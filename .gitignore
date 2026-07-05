@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.log
+user_settings.json
 
 # Generated player packages and runtime output
 builds/

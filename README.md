@@ -11,6 +11,7 @@ Configurable UE4SS C++ runtime mod for Icarus balance settings.
 5. Click the install/apply button, then fully restart Icarus.
 
 The app starts on `Vanilla Defaults` intentionally. Vanilla is a reset/default state, not an installable modified profile.
+If Icarus is not found automatically, the configurator prompts the player to select the Icarus folder or `Icarus\Binaries\Win64` and saves that path locally.
 
 ## Included Player Profile
 

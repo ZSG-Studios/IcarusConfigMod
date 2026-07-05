@@ -26,6 +26,7 @@ RUNTIME_MOD_FOLDER = "Configuration_Mod"
 RUNTIME_INI_NAME = "settings.ini"
 CURVE_RUNTIME_ENABLED = True
 APP_BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+USER_SETTINGS_PATH = APP_BASE_DIR / "user_settings.json"
 BUNDLED_UE4SS_DLLS = (
     APP_BASE_DIR / "UE4SS.dll",
     APP_BASE_DIR / "tools" / "ue4ss" / "UE4SS.dll",
@@ -948,11 +949,73 @@ class Configurator(tk.Tk):
     def runtime_values(self) -> dict[str, Decimal]:
         return {spec.key: parse_runtime_value(self.runtime_vars[spec.key].get(), spec) for spec in RUNTIME_SETTINGS}
 
-    def game_win64_dir(self) -> Path:
+    def read_user_settings(self) -> dict:
+        if not USER_SETTINGS_PATH.is_file():
+            return {}
+        try:
+            return json.loads(USER_SETTINGS_PATH.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return {}
+
+    def write_user_settings(self, settings: dict) -> None:
+        USER_SETTINGS_PATH.write_text(json.dumps(settings, indent=4) + "\n", encoding="utf-8")
+
+    def locate_steam_libraries(self) -> list[Path]:
+        roots: list[Path] = []
+        for steam in (Path(r"C:\Program Files (x86)\Steam"), Path(r"C:\Program Files\Steam")):
+            library_file = steam / "steamapps" / "libraryfolders.vdf"
+            if not library_file.is_file():
+                continue
+            roots.append(steam)
+            text = library_file.read_text(encoding="utf-8", errors="ignore")
+            for line in text.splitlines():
+                if '"path"' not in line:
+                    continue
+                parts = line.split('"')
+                if len(parts) >= 4:
+                    roots.append(Path(parts[3].replace("\\\\", "\\")))
+        return list(dict.fromkeys(roots))
+
+    def normalize_icarus_win64_dir(self, selected: Path) -> Path | None:
+        candidates = [
+            selected,
+            selected / "Binaries" / "Win64",
+            selected / "Icarus" / "Binaries" / "Win64",
+            selected / "Icarus" / "Icarus" / "Binaries" / "Win64",
+            selected / "steamapps" / "common" / "Icarus" / "Icarus" / "Binaries" / "Win64",
+        ]
+        for candidate in candidates:
+            if candidate.is_dir() and candidate.name.casefold() == "win64":
+                return candidate.resolve()
+        return None
+
+    def prompt_for_icarus_win64_dir(self) -> Path:
+        selected = filedialog.askdirectory(
+            parent=self,
+            title="Select Icarus Win64 or Icarus install folder",
+            initialdir=str(Path.home()),
+        )
+        if not selected:
+            raise FileNotFoundError("Icarus Win64 folder was not selected")
+        win64_dir = self.normalize_icarus_win64_dir(Path(selected))
+        if win64_dir is None:
+            raise FileNotFoundError(
+                "Selected folder was not an Icarus install. Select the Icarus folder or Icarus\\Binaries\\Win64."
+            )
+        settings = self.read_user_settings()
+        settings["icarus_win64_dir"] = str(win64_dir)
+        self.write_user_settings(settings)
+        self.log(f"Saved Icarus Win64 folder: {win64_dir}")
+        return win64_dir
+
+    def game_win64_dir(self, prompt: bool = False) -> Path:
         configured = os.environ.get("ICARUS_WIN64_DIR")
+        saved = self.read_user_settings().get("icarus_win64_dir")
         candidates = []
         if configured:
             candidates.append(Path(configured))
+        if saved:
+            candidates.append(Path(saved))
         candidates.extend(
             [
                 self.app_dir / "Binaries" / "Win64",
@@ -961,7 +1024,14 @@ class Configurator(tk.Tk):
                 Path(r"C:\Program Files\Steam\steamapps\common\Icarus\Icarus\Binaries\Win64"),
             ]
         )
-        return next((path.resolve() for path in candidates if path.is_dir()), candidates[-2])
+        for library in self.locate_steam_libraries():
+            candidates.append(library / "steamapps" / "common" / "Icarus" / "Icarus" / "Binaries" / "Win64")
+        detected = next((path.resolve() for path in candidates if path.is_dir()), None)
+        if detected is not None:
+            return detected
+        if prompt:
+            return self.prompt_for_icarus_win64_dir()
+        return candidates[-2]
 
     def log(self, message: str) -> None:
         line = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}"
@@ -1556,7 +1626,7 @@ class Configurator(tk.Tk):
             for cache in self.app_dir.rglob("__pycache__"):
                 shutil.rmtree(cache, ignore_errors=True)
             self.profiles_dir.mkdir(parents=True, exist_ok=True)
-            win64_dir = self.game_win64_dir()
+            win64_dir = self.game_win64_dir(prompt=True)
             if win64_dir.is_dir():
                 mods_roots = [win64_dir / "Mods", win64_dir / "ue4ss" / "Mods"]
                 names_to_remove = {RUNTIME_MOD_FOLDER} | UE4SS_BUILTIN_MODS_TO_DISABLE | OLD_RUNTIME_MOD_NAMES
@@ -1601,7 +1671,7 @@ class Configurator(tk.Tk):
                 self.refresh_console()
                 messagebox.showinfo(APP_NAME, message, parent=self)
                 return
-            win64_dir = self.game_win64_dir()
+            win64_dir = self.game_win64_dir(prompt=True)
             if not win64_dir.is_dir():
                 raise FileNotFoundError(f"Could not find Icarus Win64 folder: {win64_dir}")
             self.ensure_ue4ss_loader(win64_dir)
