@@ -1,0 +1,32 @@
+# Python caches and local logs
+__pycache__/
+*.py[cod]
+*.pyo
+*.log
+
+# Generated player packages and runtime output
+builds/
+dist/
+runtime_mods/
+backups/
+recovery/
+
+# Local UE4SS/download/build artifacts
+tools/ue4ss/
+tools/dll/out/
+tools/dll/ue4ss_build/
+
+# IDE/editor/OS noise
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+Thumbs.db
+Desktop.ini
+
+# Local environment
+.env
+.env.*

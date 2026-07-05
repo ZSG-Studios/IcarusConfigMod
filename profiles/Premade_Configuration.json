@@ -1,0 +1,102 @@
+{
+    "version": 7,
+    "mod_name": "Configuration_Mod",
+    "settings": {
+        "mining_speed": "10",
+        "mining_yield": "1.75",
+        "ore_density": "1.75",
+        "wood_yield": "1.75",
+        "skinning_yield": "1.75",
+        "reaping_yield": "1.75",
+        "processing_speed": "2.5",
+        "material_efficiency": "1",
+        "crafting_xp": "5",
+        "fuel_duration": "1",
+        "weight_reduction": "1",
+        "durability": "1",
+        "spoil_duration": "1",
+        "food_buff_duration": "1",
+        "food_buff_potency": "1",
+        "crop_speed": "5",
+        "fishing_speed": "5",
+        "health": "1",
+        "stamina": "1",
+        "carry_capacity": "1",
+        "movement_speed": "1",
+        "health_regen": "1",
+        "stamina_regen": "1",
+        "needs_duration": "1",
+        "melee_damage": "1",
+        "ranged_damage": "1",
+        "reload_speed": "1"
+    },
+    "direct_settings": {
+        "backpack_slots": "1",
+        "remove_shelter_requirement": "0",
+        "weatherproof_deployables": "0",
+        "free_craft": "0",
+        "starter_ren": "0",
+        "starter_exotics": "0",
+        "starter_red_exotics": "0",
+        "starter_biomass": "0",
+        "starter_uranium": "0",
+        "starter_licence": "0",
+        "lucky_strike_chance": "1"
+    },
+    "curve_settings": {
+        "player_talent_growth": "5.5",
+        "solo_talent_growth": "2",
+        "player_blueprint_growth": "3.5",
+        "mount_talent_growth": "2",
+        "pet_talent_growth": "2"
+    },
+    "runtime_settings": {
+        "air_control": "2",
+        "camera_tilt": "1"
+    },
+    "native_groups": {
+        "xpGroup": [
+            "5",
+            "5",
+            "5",
+            "5",
+            "5",
+            "5",
+            "5",
+            "5"
+        ],
+        "stackGroup": [
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1"
+        ],
+        "slotGroup": [
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1"
+        ],
+        "recipeOutputGroup": [
+            "1",
+            "1",
+            "1",
+            "1",
+            "1"
+        ],
+        "missionCurrencyGroup": [
+            "5",
+            "5",
+            "5",
+            "5",
+            "5",
+            "5",
+            "5"
+        ]
+    }
+}
