@@ -148,9 +148,12 @@ def stage_release(package: Path, exe: Path) -> Path:
     )
     for cache in DIST_DIR.rglob("__pycache__"):
         shutil.rmtree(cache)
-    for generated in (DIST_DIR / "backups",):
+    for generated in (DIST_DIR / "backups", DIST_DIR / "builds", DIST_DIR / "runtime_mods"):
         if generated.exists():
             shutil.rmtree(generated)
+    app_log = DIST_DIR / "configurator.log"
+    if app_log.exists():
+        app_log.unlink()
     return DIST_DIR
 
 

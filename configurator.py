@@ -623,8 +623,7 @@ class Configurator(tk.Tk):
         self.runtime_dir = self.app_dir / "runtime_mods"
         self.profiles_dir = self.app_dir / "profiles"
         self.app_log = self.app_dir / "configurator.log"
-        for path in (self.builds_dir, self.backups_dir, self.profiles_dir, self.runtime_dir):
-            path.mkdir(parents=True, exist_ok=True)
+        self.profiles_dir.mkdir(parents=True, exist_ok=True)
 
         self.setting_vars = {spec.key: tk.StringVar(value=display_multiplier(1)) for spec in SETTINGS}
         self.direct_vars = {
@@ -1305,8 +1304,10 @@ class Configurator(tk.Tk):
         try:
             initial = f"{self.safe_mod_name()}.ini"
             if silent:
+                self.builds_dir.mkdir(parents=True, exist_ok=True)
                 target = self.builds_dir / initial
             else:
+                self.builds_dir.mkdir(parents=True, exist_ok=True)
                 selected = filedialog.asksaveasfilename(
                     parent=self,
                     title="Save unified mod INI",
@@ -1553,8 +1554,7 @@ class Configurator(tk.Tk):
                     self.log(f"Removed local folder: {target}")
             for cache in self.app_dir.rglob("__pycache__"):
                 shutil.rmtree(cache, ignore_errors=True)
-            for path in (self.builds_dir, self.profiles_dir, self.runtime_dir, self.backups_dir):
-                path.mkdir(parents=True, exist_ok=True)
+            self.profiles_dir.mkdir(parents=True, exist_ok=True)
             win64_dir = self.game_win64_dir()
             if win64_dir.is_dir():
                 mods_roots = [win64_dir / "Mods", win64_dir / "ue4ss" / "Mods"]
@@ -1648,6 +1648,7 @@ class Configurator(tk.Tk):
                 cwd=str(self.app_dir),
                 check=True,
             )
+            self.builds_dir.mkdir(parents=True, exist_ok=True)
             runtime_mod = self.write_runtime_mod_package(self.builds_dir)
             self.log(f"Built C++ DLL mod folder {runtime_mod}")
             self.status_var.set(f"Built C++ DLL mod files: {runtime_mod}")
