@@ -21,7 +21,7 @@
         "fishing_speed": "2.5",
         "health": "1",
         "stamina": "1",
-        "carry_capacity": "1",
+        "carry_capacity": "1.25",
         "movement_speed": "1",
         "health_regen": "1",
         "stamina_regen": "1",

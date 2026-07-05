@@ -8,9 +8,11 @@
 #include <Unreal/Core/Containers/Map.hpp>
 #include <Unreal/NameTypes.hpp>
 #include <Unreal/Property/FArrayProperty.hpp>
+#include <Unreal/Property/FBoolProperty.hpp>
 #include <Unreal/Property/FNumericProperty.hpp>
 #include <Unreal/Property/FStructProperty.hpp>
 #include <Unreal/Core/Containers/ScriptArray.hpp>
+#include <Unreal/FProperty.hpp>
 #include <Unreal/TypeChecker.hpp>
 #include <Unreal/TObjectPtr.hpp>
 #include <Unreal/UObject.hpp>
@@ -156,6 +158,32 @@ struct ArrayRangeGroupRule {
     std::vector<const char*> exclude_contains{};
 };
 
+struct StatArrayRule {
+    const char* key;
+    const char* table_stem;
+    const char* array_field;
+    std::vector<const char*> stat_tokens;
+    NumericMode mode{NumericMode::Multiply};
+    NumericResult result{NumericResult::Nearest};
+    double minimum{0.0};
+};
+
+struct BoolTableRule {
+    const char* key;
+    const char* table_stem;
+    std::vector<const char*> fields;
+    bool value{false};
+};
+
+struct MissionRewardRule {
+    const char* key;
+    const char* table_stem;
+    const char* row_name;
+    const char* array_field;
+    const char* currency_token;
+    const char* amount_field;
+};
+
 struct GrowthCurveRule {
     const char* key;
     const char* asset_stem;
@@ -208,6 +236,38 @@ const ArrayRangeGroupRule kArrayRangeGroupRules[] = {
     {"missionCurrencyGroup", "D_FactionMissions", "CurrencyRewarded", "Amount", {{1, 25}, {26, 50}, {51, 100}, {101, 250}, {251, 500}, {501, 1000}, {1001, 1000000}}, 0.0},
 };
 
+const StatArrayRule kStatArrayRules[] = {
+    {"health", "D_CharacterStartingStats", "Stats", {"BaseMaximumHealth_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
+    {"stamina", "D_CharacterStartingStats", "Stats", {"BaseMaximumStamina_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
+    {"carry_capacity", "D_CharacterStartingStats", "Stats", {"BaseWeightCapacity_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
+    {"movement_speed", "D_CharacterStartingStats", "Stats", {"BaseMovementSpeed_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
+    {"health_regen", "D_CharacterStartingStats", "Stats", {"BaseHealthRegenPerMinute_+"}, NumericMode::Multiply, NumericResult::Nearest, 0.0},
+    {"stamina_regen", "D_CharacterStartingStats", "Stats", {"BaseStaminaRegenPerMinute_+"}, NumericMode::Multiply, NumericResult::Nearest, 0.0},
+    {
+        "needs_duration",
+        "D_CharacterStartingStats",
+        "Stats",
+        {"BaseFoodConsumptionPerHour_+", "BaseWaterConsumptionPerHour_+", "BaseOxygenConsumptionPerHour_+"},
+        NumericMode::Divide,
+        NumericResult::Nearest,
+        1.0
+    },
+};
+
+const BoolTableRule kBoolTableRules[] = {
+    {"remove_shelter_requirement", "D_Processing", {"RequiresShelter", "bRequiresShelter", "RequireShelter", "bRequireShelter"}, false},
+    {"weatherproof_deployables", "D_Deployable", {"EffectedByWeather", "bEffectedByWeather", "AffectedByWeather", "bAffectedByWeather"}, false},
+};
+
+const MissionRewardRule kMissionRewardRules[] = {
+    {"starter_ren", "D_FactionMissions", "OLY_Forest_Recon", "CurrencyRewarded", "Credits", "Amount"},
+    {"starter_exotics", "D_FactionMissions", "OLY_Forest_Recon", "CurrencyRewarded", "Exotic1", "Amount"},
+    {"starter_red_exotics", "D_FactionMissions", "OLY_Forest_Recon", "CurrencyRewarded", "Exotic_Red", "Amount"},
+    {"starter_biomass", "D_FactionMissions", "OLY_Forest_Recon", "CurrencyRewarded", "Biomass", "Amount"},
+    {"starter_uranium", "D_FactionMissions", "OLY_Forest_Recon", "CurrencyRewarded", "Exotic_Uranium", "Amount"},
+    {"starter_licence", "D_FactionMissions", "OLY_Forest_Recon", "CurrencyRewarded", "Licence", "Amount"},
+};
+
 const GrowthCurveRule kGrowthCurveRules[] = {
     {"player_talent_growth", "C_PlayerTalentGrowth"},
     {"solo_talent_growth", "C_SoloTalentGrowth"},
@@ -218,20 +278,6 @@ const GrowthCurveRule kGrowthCurveRules[] = {
 
 const UnsupportedSettingRule kUnsupportedMultiplierRules[] = {
     {"runtime", "camera_tilt", 1.0, "camera_property_not_verified"},
-    {"table_multipliers", "health", 1.0, "runtime_stat_not_implemented"},
-    {"table_multipliers", "stamina", 1.0, "runtime_stat_not_implemented"},
-    {"table_multipliers", "carry_capacity", 1.0, "runtime_stat_not_implemented"},
-    {"table_multipliers", "movement_speed", 1.0, "runtime_stat_not_implemented"},
-    {"table_multipliers", "health_regen", 1.0, "runtime_stat_not_implemented"},
-    {"table_multipliers", "stamina_regen", 1.0, "runtime_stat_not_implemented"},
-    {"table_multipliers", "needs_duration", 1.0, "runtime_stat_not_implemented"},
-    {"direct_settings", "starter_ren", 0.0, "mission_reward_direct_not_implemented"},
-    {"direct_settings", "starter_exotics", 0.0, "mission_reward_direct_not_implemented"},
-    {"direct_settings", "starter_red_exotics", 0.0, "mission_reward_direct_not_implemented"},
-    {"direct_settings", "starter_biomass", 0.0, "mission_reward_direct_not_implemented"},
-    {"direct_settings", "starter_uranium", 0.0, "mission_reward_direct_not_implemented"},
-    {"direct_settings", "starter_licence", 0.0, "mission_reward_direct_not_implemented"},
-    {"direct_settings", "lucky_strike_chance", 1.0, "talent_stat_not_implemented"},
 };
 
 bool array_range_group_mutation_enabled(const ArrayRangeGroupRule& rule) {
@@ -266,6 +312,10 @@ std::string narrow_unreal(const RC::StringType& text) {
         result.push_back(static_cast<char>(ch <= 0x7f ? ch : '?'));
     }
     return result;
+}
+
+std::string narrow_unreal(const RC::Unreal::FString& text) {
+    return narrow_unreal(RC::StringType(text.GetCharArray()));
 }
 
 bool contains_text(std::string_view haystack, std::string_view needle) {
@@ -321,6 +371,60 @@ std::string property_class_name(RC::Unreal::FProperty* property) {
     } catch (...) {
         return "<class_error>";
     }
+}
+
+std::string export_property_text(RC::Unreal::FProperty* property, const void* container) {
+    if (!property || !container) {
+        return {};
+    }
+    try {
+        RC::Unreal::FString exported;
+        const void* value = property->ContainerPtrToValuePtr<void>(const_cast<void*>(container));
+        if (!value) {
+            return {};
+        }
+        property->ExportTextItem(exported, value, nullptr, nullptr, 0);
+        return narrow_unreal(exported);
+    } catch (...) {
+        return {};
+    }
+}
+
+bool exported_struct_contains(RC::Unreal::UStruct* row_struct, const void* container, std::string_view token) {
+    if (!row_struct || !container || token.empty()) {
+        return false;
+    }
+    for (auto* property : row_struct->ForEachPropertyInChain()) {
+        if (!property) {
+            continue;
+        }
+        const auto exported = export_property_text(property, container);
+        if (contains_text(exported, token)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+RC::Unreal::FNumericProperty* find_first_numeric_property(
+    RC::Unreal::UStruct* row_struct,
+    const std::vector<const char*>& preferred_names
+) {
+    if (!row_struct) {
+        return nullptr;
+    }
+    for (const char* name : preferred_names) {
+        auto* property = find_struct_property_by_name(row_struct, name);
+        if (auto* numeric = as_numeric_property(property)) {
+            return numeric;
+        }
+    }
+    for (auto* property : row_struct->ForEachPropertyInChain()) {
+        if (auto* numeric = as_numeric_property(property)) {
+            return numeric;
+        }
+    }
+    return nullptr;
 }
 
 std::string struct_property_list(RC::Unreal::UStruct* row_struct, std::size_t limit = 80) {
@@ -698,6 +802,21 @@ private:
                 }
             }
         }
+        for (const auto& rule : kStatArrayRules) {
+            const double value = config.get_number("table_multipliers", rule.key, 1.0);
+            auto& status = ensure_setting_status(statuses, "table_multipliers", rule.key, value, !is_vanilla_multiplier(value));
+            status.targets_seen += data_tables_seen;
+        }
+        for (const auto& rule : kBoolTableRules) {
+            const bool value = config.get_bool("direct_settings", rule.key, false);
+            auto& status = ensure_setting_status(statuses, "direct_settings", rule.key, value ? 1.0 : 0.0, value);
+            status.targets_seen += data_tables_seen;
+        }
+        for (const auto& rule : kMissionRewardRules) {
+            const double value = config.get_number("direct_settings", rule.key, 0.0);
+            auto& status = ensure_setting_status(statuses, "direct_settings", rule.key, value, std::isfinite(value) && value > 0.0);
+            status.targets_seen += data_tables_seen;
+        }
         for (const auto& rule : kGrowthCurveRules) {
             const double value = config.get_number("growth_curves", rule.key, 1.0);
             auto& status = ensure_setting_status(statuses, "growth_curves", rule.key, value, !is_vanilla_multiplier(value));
@@ -707,9 +826,10 @@ private:
             const double value = config.get_number(rule.section, rule.key, rule.fallback);
             ensure_setting_status(statuses, rule.section, rule.key, value, std::isfinite(value) && value != rule.fallback, false, rule.reason);
         }
-        ensure_setting_status(statuses, "direct_settings", "remove_shelter_requirement", config.get_bool("direct_settings", "remove_shelter_requirement", false) ? 1.0 : 0.0, config.get_bool("direct_settings", "remove_shelter_requirement", false), false, "direct_table_not_implemented");
-        ensure_setting_status(statuses, "direct_settings", "weatherproof_deployables", config.get_bool("direct_settings", "weatherproof_deployables", false) ? 1.0 : 0.0, config.get_bool("direct_settings", "weatherproof_deployables", false), false, "direct_table_not_implemented");
         ensure_setting_status(statuses, "direct_settings", "free_craft", config.get_bool("direct_settings", "free_craft", false) ? 1.0 : 0.0, config.get_bool("direct_settings", "free_craft", false));
+        const double lucky_strike = config.get_number("direct_settings", "lucky_strike_chance", 1.0);
+        auto& lucky_status = ensure_setting_status(statuses, "direct_settings", "lucky_strike_chance", lucky_strike, !is_vanilla_multiplier(lucky_strike));
+        lucky_status.targets_seen += data_tables_seen;
 
         return statuses;
     }
@@ -820,17 +940,9 @@ private:
                 active.push_back(std::string(key) + "(" + reason + ")");
             }
         };
-        const auto note_bool = [&](const char* section, const char* key, const char* reason) {
-            if (config.get_bool(section, key, false)) {
-                active.push_back(std::string(key) + "(" + reason + ")");
-            }
-        };
-
         for (const auto& rule : kUnsupportedMultiplierRules) {
             note_multiplier(rule.section, rule.key, rule.fallback, rule.reason);
         }
-        note_bool("direct_settings", "remove_shelter_requirement", "direct_table_not_implemented");
-        note_bool("direct_settings", "weatherproof_deployables", "direct_table_not_implemented");
 
         if (active.empty()) {
             return;
@@ -874,6 +986,12 @@ private:
             std::size_t range_fields_missing = 0;
             std::size_t array_fields_applied = 0;
             std::size_t array_fields_missing = 0;
+            std::size_t stat_fields_applied = 0;
+            std::size_t stat_fields_missing = 0;
+            std::size_t bool_fields_applied = 0;
+            std::size_t bool_fields_missing = 0;
+            std::size_t direct_reward_fields_applied = 0;
+            std::size_t direct_reward_fields_missing = 0;
             std::size_t arrays_cleared = 0;
             std::size_t arrays_clear_missing = 0;
             const auto curve_result = apply_growth_curves(config, phase);
@@ -943,6 +1061,24 @@ private:
                     status.missing += applied.second;
                 }
 
+                for (const auto& rule : kStatArrayRules) {
+                    if (!contains_text(table_name, rule.table_stem)) {
+                        continue;
+                    }
+                    matched_this_table = true;
+                    auto& status = setting_statuses[setting_id("table_multipliers", rule.key)];
+                    ++status.targets_matched;
+                    const double multiplier = clamped_multiplier(config.get_number("table_multipliers", rule.key, 1.0), 0.0, 1000000.0);
+                    if (is_vanilla_multiplier(multiplier)) {
+                        continue;
+                    }
+                    const auto applied = apply_stat_array_rule(table, rule, multiplier);
+                    stat_fields_applied += applied.first;
+                    stat_fields_missing += applied.second;
+                    status.applied += applied.first;
+                    status.missing += applied.second;
+                }
+
                 for (const auto& rule : kArrayRangeGroupRules) {
                     if (!contains_text(table_name, rule.table_stem)) {
                         continue;
@@ -964,6 +1100,55 @@ private:
                     array_fields_missing += applied.second;
                     status.applied += applied.first;
                     status.missing += applied.second;
+                }
+
+                for (const auto& rule : kBoolTableRules) {
+                    if (!contains_text(table_name, rule.table_stem)) {
+                        continue;
+                    }
+                    matched_this_table = true;
+                    auto& status = setting_statuses[setting_id("direct_settings", rule.key)];
+                    ++status.targets_matched;
+                    if (!config.get_bool("direct_settings", rule.key, false)) {
+                        continue;
+                    }
+                    const auto applied = apply_bool_table_rule(table, rule);
+                    bool_fields_applied += applied.first;
+                    bool_fields_missing += applied.second;
+                    status.applied += applied.first;
+                    status.missing += applied.second;
+                }
+
+                for (const auto& rule : kMissionRewardRules) {
+                    if (!contains_text(table_name, rule.table_stem)) {
+                        continue;
+                    }
+                    matched_this_table = true;
+                    auto& status = setting_statuses[setting_id("direct_settings", rule.key)];
+                    ++status.targets_matched;
+                    const double amount = config.get_number("direct_settings", rule.key, 0.0);
+                    if (!std::isfinite(amount) || amount <= 0.0) {
+                        continue;
+                    }
+                    const auto applied = apply_mission_reward_rule(table, rule, amount);
+                    direct_reward_fields_applied += applied.first;
+                    direct_reward_fields_missing += applied.second;
+                    status.applied += applied.first;
+                    status.missing += applied.second;
+                }
+
+                if (contains_text(table_name, "D_Talents")) {
+                    matched_this_table = true;
+                    auto& status = setting_statuses[setting_id("direct_settings", "lucky_strike_chance")];
+                    ++status.targets_matched;
+                    const double multiplier = clamped_multiplier(config.get_number("direct_settings", "lucky_strike_chance", 1.0), 0.0, 1000000.0);
+                    if (!is_vanilla_multiplier(multiplier)) {
+                        const auto applied = apply_lucky_strike_rule(table, multiplier);
+                        stat_fields_applied += applied.first;
+                        stat_fields_missing += applied.second;
+                        status.applied += applied.first;
+                        status.missing += applied.second;
+                    }
                 }
 
                 if (contains_text(table_name, "D_ProcessorRecipes")) {
@@ -999,6 +1184,12 @@ private:
                     + " RangeFieldsMissing=" + std::to_string(range_fields_missing)
                     + " ArrayFieldsApplied=" + std::to_string(array_fields_applied)
                     + " ArrayFieldsMissing=" + std::to_string(array_fields_missing)
+                    + " StatFieldsApplied=" + std::to_string(stat_fields_applied)
+                    + " StatFieldsMissing=" + std::to_string(stat_fields_missing)
+                    + " BoolFieldsApplied=" + std::to_string(bool_fields_applied)
+                    + " BoolFieldsMissing=" + std::to_string(bool_fields_missing)
+                    + " DirectRewardFieldsApplied=" + std::to_string(direct_reward_fields_applied)
+                    + " DirectRewardFieldsMissing=" + std::to_string(direct_reward_fields_missing)
                     + " ArraysCleared=" + std::to_string(arrays_cleared)
                     + " ArraysClearMissing=" + std::to_string(arrays_clear_missing)
                     + " CurveMutationStatus=" + curve_result.status
@@ -1012,6 +1203,9 @@ private:
             return numeric_fields_applied > 0
                 || range_fields_applied > 0
                 || array_fields_applied > 0
+                || stat_fields_applied > 0
+                || bool_fields_applied > 0
+                || direct_reward_fields_applied > 0
                 || arrays_cleared > 0
                 || curve_result.keys_applied > 0;
         } catch (const std::exception& error) {
@@ -1414,6 +1608,24 @@ private:
                 return true;
             }
         }
+        for (const auto& rule : kStatArrayRules) {
+            if (contains_text(table_name, rule.table_stem)) {
+                return true;
+            }
+        }
+        for (const auto& rule : kBoolTableRules) {
+            if (contains_text(table_name, rule.table_stem)) {
+                return true;
+            }
+        }
+        for (const auto& rule : kMissionRewardRules) {
+            if (contains_text(table_name, rule.table_stem)) {
+                return true;
+            }
+        }
+        if (contains_text(table_name, "D_Talents")) {
+            return true;
+        }
         return false;
     }
 
@@ -1578,6 +1790,254 @@ private:
             }
         }
         return {applied, missing};
+    }
+
+    std::pair<std::size_t, std::size_t> apply_stat_array_rule(
+        RC::Unreal::UObject* table,
+        const StatArrayRule& rule,
+        double multiplier
+    ) {
+        const auto rows = get_table_rows(table, "stat_array_rule");
+        if (!rows) {
+            return {0, 1};
+        }
+
+        auto* array_property_base = find_struct_property_by_name(rows->row_struct, rule.array_field);
+        auto* array_property = array_property_base ? RC::Unreal::CastField<RC::Unreal::FArrayProperty>(array_property_base) : nullptr;
+        auto* inner_struct_property = array_property ? RC::Unreal::CastField<RC::Unreal::FStructProperty>(array_property->GetInner()) : nullptr;
+        RC::Unreal::UScriptStruct* inner_struct = inner_struct_property ? inner_struct_property->GetStruct() : nullptr;
+        if (!array_property || !inner_struct) {
+            append_log(
+                root_,
+                "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
+                    + " ArrayField=" + rule.array_field
+                    + " Reason=stat_array_missing_or_not_struct"
+                    + " PropertyClass=" + property_class_name(array_property_base)
+            );
+            return {0, 1};
+        }
+
+        auto* numeric_property = find_first_numeric_property(inner_struct, {"Amount", "Value", "ModifierValue", "FloatValue"});
+        if (!numeric_property) {
+            append_log(
+                root_,
+                "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
+                    + " ArrayField=" + rule.array_field
+                    + " Reason=stat_array_numeric_value_missing"
+            );
+            return {0, 1};
+        }
+
+        std::size_t applied = 0;
+        std::size_t missing = 0;
+        for (auto it = rows->row_map->CreateIterator(); it; ++it) {
+            unsigned char* row = it.Value();
+            void* array_ptr = row ? array_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row)) : nullptr;
+            if (!array_ptr) {
+                ++missing;
+                continue;
+            }
+            auto* array = static_cast<RC::Unreal::FScriptArray*>(array_ptr);
+            const int32_t element_size = array_property->GetInner()->GetElementSize();
+            const int32_t count = array ? array->Num() : 0;
+            for (int32_t index = 0; index < count; ++index) {
+                auto* element = static_cast<unsigned char*>(array->GetData()) + (index * element_size);
+                if (!element) {
+                    ++missing;
+                    continue;
+                }
+                bool token_match = false;
+                for (const char* token : rule.stat_tokens) {
+                    if (exported_struct_contains(inner_struct, element, token)) {
+                        token_match = true;
+                        break;
+                    }
+                }
+                if (!token_match) {
+                    continue;
+                }
+
+                void* value_ptr = numeric_property->ContainerPtrToValuePtr<void>(static_cast<void*>(element));
+                if (!value_ptr) {
+                    ++missing;
+                    continue;
+                }
+                const double current = numeric_property->IsFloatingPoint()
+                    ? numeric_property->GetFloatingPointPropertyValue(value_ptr)
+                    : static_cast<double>(numeric_property->GetSignedIntPropertyValue(value_ptr));
+                const double baseline = numeric_baselines_.try_emplace(value_ptr, current).first->second;
+                const double adjusted = adjusted_numeric(baseline, multiplier, rule.mode, rule.result, rule.minimum);
+                if (numeric_property->IsFloatingPoint()) {
+                    numeric_property->SetFloatingPointPropertyValue(value_ptr, adjusted);
+                } else {
+                    numeric_property->SetIntPropertyValue(value_ptr, static_cast<int64_t>(std::llround(adjusted)));
+                }
+                ++applied;
+            }
+        }
+
+        if (applied == 0) {
+            append_log(
+                root_,
+                "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
+                    + " ArrayField=" + rule.array_field
+                    + " Key=" + rule.key
+                    + " Reason=stat_token_not_found"
+            );
+        }
+        return {applied, missing + (applied == 0 ? 1 : 0)};
+    }
+
+    std::pair<std::size_t, std::size_t> apply_bool_table_rule(RC::Unreal::UObject* table, const BoolTableRule& rule) {
+        const auto rows = get_table_rows(table, "bool_table_rule");
+        if (!rows) {
+            return {0, 1};
+        }
+
+        std::size_t applied = 0;
+        std::size_t missing = 0;
+        for (const char* field_name : rule.fields) {
+            auto* property = find_struct_property_by_name(rows->row_struct, field_name);
+            auto* bool_property = property ? RC::Unreal::CastField<RC::Unreal::FBoolProperty>(property) : nullptr;
+            if (!bool_property) {
+                ++missing;
+                continue;
+            }
+            for (auto it = rows->row_map->CreateIterator(); it; ++it) {
+                unsigned char* row = it.Value();
+                void* value_ptr = row ? bool_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row)) : nullptr;
+                if (!value_ptr) {
+                    ++missing;
+                    continue;
+                }
+                bool_property->SetPropertyValue(value_ptr, rule.value);
+                ++applied;
+            }
+        }
+        if (applied == 0) {
+            append_log(root_, "FIELD_MISS Table=" + narrow_unreal(table->GetFullName()) + " Key=" + rule.key + " Reason=bool_field_not_found");
+        }
+        return {applied, applied == 0 ? std::max<std::size_t>(missing, 1) : missing};
+    }
+
+    std::pair<std::size_t, std::size_t> apply_mission_reward_rule(
+        RC::Unreal::UObject* table,
+        const MissionRewardRule& rule,
+        double amount
+    ) {
+        const auto rows = get_table_rows(table, "mission_reward_rule");
+        if (!rows) {
+            return {0, 1};
+        }
+
+        auto* array_property_base = find_struct_property_by_name(rows->row_struct, rule.array_field);
+        auto* array_property = array_property_base ? RC::Unreal::CastField<RC::Unreal::FArrayProperty>(array_property_base) : nullptr;
+        auto* inner_struct_property = array_property ? RC::Unreal::CastField<RC::Unreal::FStructProperty>(array_property->GetInner()) : nullptr;
+        RC::Unreal::UScriptStruct* inner_struct = inner_struct_property ? inner_struct_property->GetStruct() : nullptr;
+        auto* amount_property_base = inner_struct ? find_struct_property_by_name(inner_struct, rule.amount_field) : nullptr;
+        auto* amount_property = as_numeric_property(amount_property_base);
+        if (!array_property || !inner_struct || !amount_property) {
+            append_log(root_, "FIELD_MISS Table=" + narrow_unreal(table->GetFullName()) + " Key=" + rule.key + " Reason=reward_array_or_amount_missing");
+            return {0, 1};
+        }
+
+        std::size_t applied = 0;
+        std::size_t missing = 0;
+        for (auto it = rows->row_map->CreateIterator(); it; ++it) {
+            const auto row_name = narrow_unreal(it.Key().ToString());
+            if (row_name != rule.row_name) {
+                continue;
+            }
+            unsigned char* row = it.Value();
+            void* array_ptr = row ? array_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row)) : nullptr;
+            auto* array = array_ptr ? static_cast<RC::Unreal::FScriptArray*>(array_ptr) : nullptr;
+            const int32_t element_size = array_property->GetInner()->GetElementSize();
+            const int32_t count = array ? array->Num() : 0;
+            for (int32_t index = 0; index < count; ++index) {
+                auto* element = static_cast<unsigned char*>(array->GetData()) + (index * element_size);
+                if (!element || !exported_struct_contains(inner_struct, element, rule.currency_token)) {
+                    continue;
+                }
+                void* value_ptr = amount_property->ContainerPtrToValuePtr<void>(static_cast<void*>(element));
+                if (!value_ptr) {
+                    ++missing;
+                    continue;
+                }
+                if (amount_property->IsFloatingPoint()) {
+                    amount_property->SetFloatingPointPropertyValue(value_ptr, amount);
+                } else {
+                    amount_property->SetIntPropertyValue(value_ptr, static_cast<int64_t>(std::llround(amount)));
+                }
+                ++applied;
+            }
+        }
+        if (applied == 0) {
+            append_log(root_, "FIELD_MISS Table=" + narrow_unreal(table->GetFullName()) + " Key=" + rule.key + " Reason=mission_reward_row_or_currency_not_found");
+        }
+        return {applied, missing + (applied == 0 ? 1 : 0)};
+    }
+
+    std::pair<std::size_t, std::size_t> apply_lucky_strike_rule(RC::Unreal::UObject* table, double multiplier) {
+        const auto rows = get_table_rows(table, "lucky_strike_rule");
+        if (!rows) {
+            return {0, 1};
+        }
+
+        std::size_t applied = 0;
+        std::size_t missing = 0;
+        for (auto it = rows->row_map->CreateIterator(); it; ++it) {
+            const auto row_name = narrow_unreal(it.Key().ToString());
+            if (row_name != "Resources_Voxel_Instant") {
+                continue;
+            }
+            unsigned char* row = it.Value();
+            if (!row) {
+                ++missing;
+                continue;
+            }
+            for (auto* property : rows->row_struct->ForEachPropertyInChain()) {
+                auto* array_property = property ? RC::Unreal::CastField<RC::Unreal::FArrayProperty>(property) : nullptr;
+                auto* inner_struct_property = array_property ? RC::Unreal::CastField<RC::Unreal::FStructProperty>(array_property->GetInner()) : nullptr;
+                RC::Unreal::UScriptStruct* inner_struct = inner_struct_property ? inner_struct_property->GetStruct() : nullptr;
+                if (!array_property || !inner_struct) {
+                    continue;
+                }
+                auto* numeric_property = find_first_numeric_property(inner_struct, {"Amount", "Value", "ModifierValue", "FloatValue"});
+                if (!numeric_property) {
+                    continue;
+                }
+                void* array_ptr = array_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row));
+                auto* array = array_ptr ? static_cast<RC::Unreal::FScriptArray*>(array_ptr) : nullptr;
+                const int32_t element_size = array_property->GetInner()->GetElementSize();
+                const int32_t count = array ? array->Num() : 0;
+                for (int32_t index = 0; index < count; ++index) {
+                    auto* element = static_cast<unsigned char*>(array->GetData()) + (index * element_size);
+                    if (!element || !exported_struct_contains(inner_struct, element, "BaseChanceToMineVoxelInstantly_+%")) {
+                        continue;
+                    }
+                    void* value_ptr = numeric_property->ContainerPtrToValuePtr<void>(static_cast<void*>(element));
+                    if (!value_ptr) {
+                        ++missing;
+                        continue;
+                    }
+                    const double current = numeric_property->IsFloatingPoint()
+                        ? numeric_property->GetFloatingPointPropertyValue(value_ptr)
+                        : static_cast<double>(numeric_property->GetSignedIntPropertyValue(value_ptr));
+                    const double baseline = numeric_baselines_.try_emplace(value_ptr, current).first->second;
+                    const double adjusted = adjusted_numeric(baseline, multiplier, NumericMode::Multiply, NumericResult::Float, 0.0);
+                    if (numeric_property->IsFloatingPoint()) {
+                        numeric_property->SetFloatingPointPropertyValue(value_ptr, adjusted);
+                    } else {
+                        numeric_property->SetIntPropertyValue(value_ptr, static_cast<int64_t>(std::llround(adjusted)));
+                    }
+                    ++applied;
+                }
+            }
+        }
+        if (applied == 0) {
+            append_log(root_, "FIELD_MISS Table=" + narrow_unreal(table->GetFullName()) + " Key=lucky_strike_chance Reason=talent_stat_row_or_token_not_found");
+        }
+        return {applied, missing + (applied == 0 ? 1 : 0)};
     }
 
     std::pair<std::size_t, std::size_t> apply_array_range_group(
