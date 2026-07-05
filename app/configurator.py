@@ -25,9 +25,14 @@ UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 RUNTIME_MOD_FOLDER = "Configuration_Mod"
 RUNTIME_INI_NAME = "settings.ini"
 CURVE_RUNTIME_ENABLED = True
+IS_BUNDLED_APP = (
+    getattr(sys, "frozen", False)
+    or "__compiled__" in globals()
+    or Path(sys.executable).name.casefold() == "icarusconfigmod.exe"
+)
 APP_BASE_DIR = (
     Path(sys.executable).resolve().parent
-    if getattr(sys, "frozen", False) or "__compiled__" in globals()
+    if IS_BUNDLED_APP
     else Path(__file__).resolve().parent.parent
 )
 USER_SETTINGS_PATH = APP_BASE_DIR / "user_settings.json"
@@ -626,7 +631,7 @@ class Configurator(tk.Tk):
         self.builds_dir = self.app_dir / "builds"
         self.backups_dir = self.app_dir / "backups"
         self.runtime_dir = self.app_dir / "runtime_mods"
-        self.profiles_dir = self.app_dir / "profiles" if getattr(sys, "frozen", False) else self.app_dir / "config" / "profiles"
+        self.profiles_dir = self.app_dir / "profiles" if IS_BUNDLED_APP else self.app_dir / "config" / "profiles"
         self.app_log = self.app_dir / "configurator.log"
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
 
