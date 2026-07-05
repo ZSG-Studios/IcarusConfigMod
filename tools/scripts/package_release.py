@@ -21,6 +21,7 @@ if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 DIST_DIR = APP_DIR / "dist" / "IcarusConfigMod"
+EXE_WORK_DIR = APP_DIR / "tools" / "exe_build"
 
 
 def run(arguments: list[str]) -> None:
@@ -39,6 +40,50 @@ def build_dll() -> Path:
     if not ue4ss.is_file():
         raise FileNotFoundError(f"Compiled UE4SS runtime missing: {ue4ss}")
     return dll
+
+
+def ensure_pyinstaller() -> None:
+    completed = subprocess.run(
+        [sys.executable, "-m", "PyInstaller", "--version"],
+        cwd=str(APP_DIR),
+        text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if completed.returncode == 0:
+        return
+    run([sys.executable, "-m", "pip", "install", "pyinstaller"])
+
+
+def build_configurator_exe() -> Path:
+    ensure_pyinstaller()
+    if EXE_WORK_DIR.exists():
+        shutil.rmtree(EXE_WORK_DIR)
+    EXE_WORK_DIR.mkdir(parents=True)
+    run(
+        [
+            sys.executable,
+            "-m",
+            "PyInstaller",
+            "--noconfirm",
+            "--clean",
+            "--onefile",
+            "--windowed",
+            "--name",
+            "IcarusConfigMod",
+            "--distpath",
+            str(EXE_WORK_DIR / "dist"),
+            "--workpath",
+            str(EXE_WORK_DIR / "work"),
+            "--specpath",
+            str(EXE_WORK_DIR),
+            str(APP_DIR / "configurator.py"),
+        ]
+    )
+    exe = EXE_WORK_DIR / "dist" / "IcarusConfigMod.exe"
+    if not exe.is_file():
+        raise FileNotFoundError(f"PyInstaller did not produce expected exe: {exe}")
+    return exe
 
 
 def generate_package() -> Path:
@@ -85,29 +130,22 @@ def copy_file(source: Path, target: Path) -> None:
     shutil.copy2(source, target)
 
 
-def stage_release(package: Path) -> Path:
+def stage_release(package: Path, exe: Path) -> Path:
     if DIST_DIR.exists():
         shutil.rmtree(DIST_DIR)
     DIST_DIR.mkdir(parents=True)
-    copy_file(APP_DIR / "Setup.bat", DIST_DIR / "Setup.bat")
-    copy_file(APP_DIR / "Launch.bat", DIST_DIR / "Launch.bat")
-    copy_file(APP_DIR / "Reset.bat", DIST_DIR / "Reset.bat")
+    copy_file(exe, DIST_DIR / "IcarusConfigMod.exe")
     copy_file(APP_DIR / "README.md", DIST_DIR / "README.md")
     copy_file(APP_DIR / "LICENSE", DIST_DIR / "LICENSE")
-    copy_file(APP_DIR / "configurator.py", DIST_DIR / "configurator.py")
     shutil.copytree(APP_DIR / "profiles", DIST_DIR / "profiles")
     shutil.copytree(package, DIST_DIR / "builds" / package.name)
-    scripts_target = DIST_DIR / "tools" / "scripts"
-    copy_file(APP_DIR / "tools" / "scripts" / "install_runtime.py", scripts_target / "install_runtime.py")
-    copy_file(APP_DIR / "tools" / "scripts" / "reset.py", scripts_target / "reset.py")
     ue4ss_target = DIST_DIR / "tools" / "ue4ss"
     ue4ss_target.mkdir(parents=True, exist_ok=True)
     copy_file(APP_DIR / "tools" / "dll" / "out" / "UE4SS.dll", ue4ss_target / "UE4SS.dll")
     (DIST_DIR / "PLAYER_README.txt").write_text(
-        "Run Setup.bat to install the Icarus configuration mod.\n"
-        "Run Launch.bat to edit settings.\n"
-        "This player package ships a prebuilt UE4SS C++ DLL runtime; no player-side build is required.\n"
-        "Run Reset.bat to remove this mod and generated local files.\n",
+        "Run IcarusConfigMod.exe to edit profiles, install the UE4SS runtime mod, or reset installed files.\n"
+        "This player package ships a portable configurator and prebuilt UE4SS C++ DLL runtime.\n"
+        "No player-side Python install, build step, batch file, or PowerShell script is required.\n",
         encoding="utf-8",
     )
     for cache in DIST_DIR.rglob("__pycache__"):
@@ -121,8 +159,9 @@ def stage_release(package: Path) -> Path:
 def main() -> int:
     try:
         build_dll()
+        exe = build_configurator_exe()
         package = generate_package()
-        dist = stage_release(package)
+        dist = stage_release(package, exe)
         archive = shutil.make_archive(str(dist), "zip", root_dir=dist)
         print(f"Release folder: {dist}")
         print(f"Release zip: {archive}")

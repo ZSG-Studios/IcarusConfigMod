@@ -15,6 +15,7 @@ recovery/
 tools/ue4ss/
 tools/dll/out/
 tools/dll/ue4ss_build/
+tools/exe_build/
 
 # IDE/editor/OS noise
 .vs/

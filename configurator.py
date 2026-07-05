@@ -25,9 +25,10 @@ UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 RUNTIME_MOD_FOLDER = "Configuration_Mod"
 RUNTIME_INI_NAME = "settings.ini"
 CURVE_RUNTIME_ENABLED = True
+APP_BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 BUNDLED_UE4SS_DLLS = (
-    Path(__file__).resolve().parent / "tools" / "ue4ss" / "UE4SS.dll",
-    Path(__file__).resolve().parent / "tools" / "dll" / "out" / "UE4SS.dll",
+    APP_BASE_DIR / "tools" / "ue4ss" / "UE4SS.dll",
+    APP_BASE_DIR / "tools" / "dll" / "out" / "UE4SS.dll",
 )
 
 UI_BG = "#071014"
@@ -615,7 +616,7 @@ class Configurator(tk.Tk):
         self.geometry(f"{width}x{height}+{max(0, (screen_w - width) // 2)}+{max(0, (screen_h - height) // 2)}")
         self.minsize(min(980, width), min(680, height))
 
-        self.app_dir = Path(__file__).resolve().parent
+        self.app_dir = APP_BASE_DIR
         self.builds_dir = self.app_dir / "builds"
         self.backups_dir = self.app_dir / "backups"
         self.runtime_dir = self.app_dir / "runtime_mods"
@@ -751,6 +752,7 @@ class Configurator(tk.Tk):
         ttk.Button(console_actions, text="Refresh Logs", style="Soft.TButton", command=self.refresh_console).pack(side=tk.LEFT)
         ttk.Button(console_actions, text="Clear App Log", style="Soft.TButton", command=self.clear_app_log).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(console_actions, text="Open Runtime Folder", style="Soft.TButton", command=self.open_runtime_folder).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(console_actions, text="Reset Installed Mod", style="Soft.TButton", command=self.reset_installed_mod).pack(side=tk.LEFT, padx=(6, 0))
         self.console_text = tk.Text(console_outer, height=20, wrap=tk.WORD, font=("Consolas", 9), background="#050a0d", foreground=UI_TEXT, insertbackground=UI_TEAL, selectbackground=UI_TEAL_DARK, relief=tk.FLAT, borderwidth=0)
         console_scroll = ttk.Scrollbar(console_outer, orient=tk.VERTICAL, command=self.console_text.yview)
         self.console_text.configure(yscrollcommand=console_scroll.set)
@@ -1534,6 +1536,59 @@ class Configurator(tk.Tk):
             if target.exists():
                 shutil.move(str(target), str(self.backup_existing_runtime_file(target)))
                 self.log(f"Moved old runtime folder to backup: {target}")
+
+    def reset_installed_mod(self) -> None:
+        try:
+            if not messagebox.askyesno(
+                APP_NAME,
+                "Remove installed Configuration_Mod runtime files and clean generated local files?",
+                parent=self,
+            ):
+                return
+            for relative in ("backups", "runtime_mods"):
+                target = self.app_dir / relative
+                if target.exists():
+                    shutil.rmtree(target)
+                    self.log(f"Removed local folder: {target}")
+            for cache in self.app_dir.rglob("__pycache__"):
+                shutil.rmtree(cache, ignore_errors=True)
+            for path in (self.builds_dir, self.profiles_dir, self.runtime_dir, self.backups_dir):
+                path.mkdir(parents=True, exist_ok=True)
+            win64_dir = self.game_win64_dir()
+            if win64_dir.is_dir():
+                mods_roots = [win64_dir / "Mods", win64_dir / "ue4ss" / "Mods"]
+                names_to_remove = {RUNTIME_MOD_FOLDER} | UE4SS_BUILTIN_MODS_TO_DISABLE | OLD_RUNTIME_MOD_NAMES
+                for root in mods_roots:
+                    for name in names_to_remove:
+                        target = root / name
+                        if target.exists():
+                            if target.is_dir():
+                                shutil.rmtree(target)
+                            else:
+                                target.unlink()
+                            self.log(f"Removed installed runtime path: {target}")
+                    mods_txt = root / "mods.txt"
+                    if mods_txt.is_file():
+                        lines = mods_txt.read_text(encoding="utf-8", errors="ignore").splitlines()
+                        filtered = [
+                            line for line in lines
+                            if not any(line.strip().casefold().startswith(f"{name.casefold()} :") for name in names_to_remove)
+                        ]
+                        if filtered:
+                            mods_txt.write_text("\n".join(filtered).rstrip() + "\n", encoding="utf-8")
+                            self.log(f"Cleaned mod load order: {mods_txt}")
+                        else:
+                            mods_txt.unlink()
+                            self.log(f"Removed empty mod load order: {mods_txt}")
+                ue4ss_log = win64_dir / "UE4SS.log"
+                if ue4ss_log.exists():
+                    ue4ss_log.unlink()
+                    self.log(f"Removed UE4SS log: {ue4ss_log}")
+            self.status_var.set("Reset complete. Runtime mod files were removed where found.")
+            self.refresh_console()
+            messagebox.showinfo(APP_NAME, "Reset complete.", parent=self)
+        except Exception as error:
+            self.show_error("Reset failed", error)
 
     def install_runtime_support(self) -> None:
         try:

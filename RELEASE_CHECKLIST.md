@@ -7,23 +7,19 @@ Use this before uploading a beta package.
 - Run `python -m py_compile configurator.py tools\scripts\install_runtime.py tools\scripts\package_release.py tools\scripts\reset.py`.
 - Run `python tools\scripts\package_release.py`.
 - Confirm `dist\IcarusConfigMod.zip` was updated.
+- Confirm the player zip contains no `.bat`, `.ps1`, or player-side `.py` launch scripts.
 
 ## Package Contents
 
 The player zip should include:
 
-- `Setup.bat`
-- `Launch.bat`
-- `Reset.bat`
-- `configurator.py`
+- `IcarusConfigMod.exe`
 - `PLAYER_README.txt`
 - `profiles/Premade_Configuration.json`
 - `builds/Configuration_Mod/settings.ini`
 - `builds/Configuration_Mod/runtime_config.json`
 - `builds/Configuration_Mod/option_manifest.json`
 - `builds/Configuration_Mod/dlls/main.dll`
-- `tools/scripts/install_runtime.py`
-- `tools/scripts/reset.py`
 - `tools/ue4ss/UE4SS.dll`
 
 The player zip should not include:
@@ -33,6 +29,11 @@ The player zip should not include:
 - `configurator.log`
 - `__pycache__/`
 - `tools/dll/ue4ss_build/`
+- `Setup.bat`
+- `Launch.bat`
+- `Reset.bat`
+- `configurator.py`
+- `tools/scripts/`
 - local Icarus save files
 
 ## In-App Checks

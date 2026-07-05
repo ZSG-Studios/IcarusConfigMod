@@ -6,10 +6,9 @@ Configurable UE4SS C++ runtime mod for Icarus balance settings.
 
 1. Download the release zip.
 2. Extract it anywhere outside the Icarus install folder.
-3. Run `Setup.bat`.
-4. Run `Launch.bat`.
-5. In the configurator, choose `Premade_Configuration` or import/save a custom profile.
-6. Click the install/apply button, then fully restart Icarus.
+3. Run `IcarusConfigMod.exe`.
+4. In the configurator, choose `Premade_Configuration` or import/save a custom profile.
+5. Click the install/apply button, then fully restart Icarus.
 
 The app starts on `Vanilla Defaults` intentionally. Vanilla is a reset/default state, not an installable modified profile.
 
@@ -25,7 +24,7 @@ Saved or imported player profiles are copied into `profiles/` and then appear in
 
 - `configurator.py` - Tkinter configuration app and runtime package writer.
 - `profiles/` - shipped and user-created profile JSON files.
-- `tools/scripts/install_runtime.py` - player setup/install script used by `Setup.bat`.
+- `tools/scripts/install_runtime.py` - developer/player setup script retained for source builds.
 - `tools/scripts/package_release.py` - developer release packager.
 - `tools/scripts/build_dll.py` - developer DLL build helper.
 - `tools/dll/src/` - UE4SS C++ runtime source.
@@ -60,6 +59,8 @@ The player zip is written to:
 ```text
 dist\IcarusConfigMod.zip
 ```
+
+The player zip is portable and ships `IcarusConfigMod.exe`; no player-side Python install, batch file, PowerShell script, or build step is required.
 
 ## Runtime Validation
 
