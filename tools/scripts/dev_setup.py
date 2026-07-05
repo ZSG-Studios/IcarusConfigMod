@@ -61,9 +61,13 @@ def visual_studio_build_tools_found() -> bool:
     )
 
 
-def install_pyinstaller() -> None:
-    print("Installing PyInstaller with pip...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "pyinstaller"], cwd=str(REPO_ROOT), check=True)
+def install_nuitka() -> None:
+    print("Installing Nuitka with pip...")
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "nuitka", "ordered-set", "zstandard"],
+        cwd=str(REPO_ROOT),
+        check=True,
+    )
 
 
 def install_rust() -> None:
@@ -99,12 +103,12 @@ def main() -> int:
     checks.append(("CMake", command_version("cmake", "--version") is not None, command_version("cmake", "--version") or "missing"))
     checks.append(("Rust", command_version("rustc", "--version") is not None, command_version("rustc", "--version") or "missing"))
     checks.append(("Visual Studio C++ Build Tools", visual_studio_build_tools_found(), "MSVC toolchain"))
-    checks.append(("PyInstaller", python_module_available("PyInstaller"), "Python exe packager"))
+    checks.append(("Nuitka", python_module_available("nuitka"), "Python standalone app compiler"))
 
     missing = [name for name, ok, _detail in checks if not ok]
     if args.install:
-        if "PyInstaller" in missing:
-            install_pyinstaller()
+        if "Nuitka" in missing:
+            install_nuitka()
         if "Rust" in missing:
             install_rust()
         return main_without_install()

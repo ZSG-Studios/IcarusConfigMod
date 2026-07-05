@@ -25,7 +25,11 @@ UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 RUNTIME_MOD_FOLDER = "Configuration_Mod"
 RUNTIME_INI_NAME = "settings.ini"
 CURVE_RUNTIME_ENABLED = True
-APP_BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+APP_BASE_DIR = (
+    Path(sys.executable).resolve().parent
+    if getattr(sys, "frozen", False) or "__compiled__" in globals()
+    else Path(__file__).resolve().parent.parent
+)
 USER_SETTINGS_PATH = APP_BASE_DIR / "user_settings.json"
 BUNDLED_UE4SS_DLLS = (
     APP_BASE_DIR / "UE4SS.dll",

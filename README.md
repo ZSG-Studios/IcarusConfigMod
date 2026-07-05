@@ -15,13 +15,13 @@ Open source: https://github.com/ZSG-Studios/IcarusConfigMod
 7. Enter a prospect/session so Icarus loads the runtime tables.
 8. Check the runtime validation log from the configurator if you want to confirm a clean pass.
 
-The release is portable for players. It does not require Python, PowerShell scripts, batch files, Visual Studio, CMake, Rust, or PyInstaller on the player's system.
+The release is portable for players. It does not require Python, PowerShell scripts, batch files, Visual Studio, CMake, Rust, Nuitka, or PyInstaller on the player's system.
 
 If Icarus is not found automatically, the configurator prompts the player to select the Icarus folder or `Icarus\Binaries\Win64` and saves that path locally in `user_settings.json`.
 
 ## Player Package Layout
 
-The player zip intentionally stays flat:
+The player zip keeps the mod files at the root. The configurator is built as a portable Nuitka standalone app bundle instead of a PyInstaller one-file archive to reduce generic AV false positives:
 
 ```text
 IcarusConfigMod.exe
@@ -29,6 +29,7 @@ UE4SS.dll
 main.dll
 Configuration_Mod/
 profiles/
+*.dll / *.pyd runtime files required by the portable app
 README.md
 PLAYER_README.txt
 LICENSE
@@ -36,7 +37,7 @@ LICENSE
 
 `main.dll` is shipped at the package root for a clean download layout. When the player applies settings, the configurator installs it into the UE4SS-required game layout: `Configuration_Mod\dlls\main.dll`.
 
-The player zip must not contain `.bat`, `.ps1`, `.py`, `tools/`, `builds/`, `runtime_mods/`, `backups/`, `configurator.log`, or `Configuration_Mod/dlls/`.
+The player zip must not contain `.bat`, `.ps1`, `.py` launch scripts, PyInstaller artifacts, `tools/`, `builds/`, `runtime_mods/`, `backups/`, `configurator.log`, or `Configuration_Mod/dlls/`.
 
 ## Profiles
 
@@ -85,7 +86,7 @@ Requirements:
 - CMake.
 - Git.
 - Rust toolchain, required by UE4SS C++ template dependencies.
-- PyInstaller, used only for building the portable player exe.
+- Nuitka, used only for building the portable player app bundle.
 
 Check the local environment:
 

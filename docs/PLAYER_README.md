@@ -12,7 +12,7 @@ Portable UE4SS C++ runtime configuration mod for Icarus.
 6. Fully close and restart Icarus.
 7. Enter a prospect/session so Icarus loads the runtime tables.
 
-No Python, batch files, PowerShell scripts, Visual Studio, CMake, Rust, or PyInstaller are required for players.
+No Python, batch files, PowerShell scripts, Visual Studio, CMake, Rust, Nuitka, or PyInstaller are required for players.
 
 ## Included Files
 
@@ -22,6 +22,7 @@ UE4SS.dll
 main.dll
 Configuration_Mod/
 profiles/
+*.dll / *.pyd runtime files required by the portable app
 README.md
 PLAYER_README.txt
 LICENSE

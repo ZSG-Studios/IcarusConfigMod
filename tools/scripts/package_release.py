@@ -46,9 +46,9 @@ def build_dll() -> Path:
     return dll
 
 
-def ensure_pyinstaller() -> None:
+def ensure_nuitka() -> None:
     completed = subprocess.run(
-        [sys.executable, "-m", "PyInstaller", "--version"],
+        [sys.executable, "-m", "nuitka", "--version"],
         cwd=str(APP_DIR),
         text=True,
         stdout=subprocess.DEVNULL,
@@ -56,11 +56,11 @@ def ensure_pyinstaller() -> None:
     )
     if completed.returncode == 0:
         return
-    run([sys.executable, "-m", "pip", "install", "pyinstaller"])
+    run([sys.executable, "-m", "pip", "install", "nuitka", "ordered-set", "zstandard"])
 
 
-def build_configurator_exe() -> Path:
-    ensure_pyinstaller()
+def build_configurator_app() -> Path:
+    ensure_nuitka()
     if EXE_WORK_DIR.exists():
         shutil.rmtree(EXE_WORK_DIR)
     EXE_WORK_DIR.mkdir(parents=True)
@@ -68,26 +68,21 @@ def build_configurator_exe() -> Path:
         [
             sys.executable,
             "-m",
-            "PyInstaller",
-            "--noconfirm",
-            "--clean",
-            "--onefile",
-            "--windowed",
-            "--name",
-            "IcarusConfigMod",
-            "--distpath",
-            str(EXE_WORK_DIR / "dist"),
-            "--workpath",
-            str(EXE_WORK_DIR / "work"),
-            "--specpath",
-            str(EXE_WORK_DIR),
+            "nuitka",
+            "--standalone",
+            "--enable-plugin=tk-inter",
+            "--windows-console-mode=disable",
+            "--assume-yes-for-downloads",
+            "--output-dir=" + str(EXE_WORK_DIR),
+            "--output-filename=IcarusConfigMod.exe",
+            "--remove-output",
             str(APP_SOURCE_DIR / "configurator.py"),
         ]
     )
-    exe = EXE_WORK_DIR / "dist" / "IcarusConfigMod.exe"
+    exe = EXE_WORK_DIR / "configurator.dist" / "IcarusConfigMod.exe"
     if not exe.is_file():
-        raise FileNotFoundError(f"PyInstaller did not produce expected exe: {exe}")
-    return exe
+        raise FileNotFoundError(f"Nuitka did not produce expected exe: {exe}")
+    return exe.parent
 
 
 def generate_package() -> Path:
@@ -137,11 +132,10 @@ def copy_file(source: Path, target: Path) -> None:
     shutil.copy2(source, target)
 
 
-def stage_release(package: Path, exe: Path) -> Path:
+def stage_release(package: Path, app_bundle: Path) -> Path:
     if DIST_DIR.exists():
         shutil.rmtree(DIST_DIR)
-    DIST_DIR.mkdir(parents=True)
-    copy_file(exe, DIST_DIR / "IcarusConfigMod.exe")
+    shutil.copytree(app_bundle, DIST_DIR)
     copy_file(APP_DIR / "docs" / "PLAYER_README.md", DIST_DIR / "README.md")
     copy_file(APP_DIR / "LICENSE", DIST_DIR / "LICENSE")
     shutil.copytree(SOURCE_PROFILES_DIR, DIST_DIR / "profiles")
@@ -168,9 +162,9 @@ def stage_release(package: Path, exe: Path) -> Path:
 def main() -> int:
     try:
         build_dll()
-        exe = build_configurator_exe()
+        app_bundle = build_configurator_app()
         package = generate_package()
-        dist = stage_release(package, exe)
+        dist = stage_release(package, app_bundle)
         archive = shutil.make_archive(str(dist), "zip", root_dir=dist)
         print(f"Release folder: {dist}")
         print(f"Release zip: {archive}")

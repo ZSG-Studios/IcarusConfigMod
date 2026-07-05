@@ -9,6 +9,7 @@ Use this before uploading a beta package.
 - Run `python tools\scripts\package_release.py`.
 - Confirm `dist\IcarusConfigMod.zip` was updated.
 - Confirm the player zip contains no `.bat`, `.ps1`, or player-side `.py` launch scripts.
+- Confirm the player zip does not contain PyInstaller `*.pkg`, `*.spec`, `_MEI*`, or `pyi-*` artifacts.
 - Confirm the staged player folder does not contain generated `backups`, `builds`, `runtime_mods`, `tools`, `configurator.log`, `user_settings.json`, or `Configuration_Mod/dlls`.
 - Source-only root `.bat` wrappers are allowed in Git, but must not appear in `dist`.
 
@@ -25,6 +26,7 @@ The player zip should include:
 - `Configuration_Mod/settings.ini`
 - `Configuration_Mod/runtime_config.json`
 - `Configuration_Mod/option_manifest.json`
+- standalone app runtime DLL/PYD files required by Nuitka
 
 The player zip should not include:
 
