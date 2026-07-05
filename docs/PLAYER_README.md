@@ -30,6 +30,8 @@ LICENSE
 
 `main.dll` is shipped at the package root for a clean download layout. The configurator installs it into the UE4SS-required game layout when applying settings.
 
+Backups, logs, saved Icarus folder selection, and generated runtime work files are stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\`, not in the extracted mod folder.
+
 ## Profiles
 
 The app starts on `Vanilla Defaults`. The included premade profile is `Premade_Configuration`.

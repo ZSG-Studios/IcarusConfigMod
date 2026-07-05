@@ -35,7 +35,17 @@ APP_BASE_DIR = (
     if IS_BUNDLED_APP
     else Path(__file__).resolve().parent.parent
 )
-USER_SETTINGS_PATH = APP_BASE_DIR / "user_settings.json"
+
+
+def user_state_dir() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "ZSG Studios" / "IcarusConfigMod"
+    return Path.home() / "AppData" / "Local" / "ZSG Studios" / "IcarusConfigMod"
+
+
+APP_STATE_DIR = user_state_dir()
+USER_SETTINGS_PATH = APP_STATE_DIR / "user_settings.json"
 BUNDLED_UE4SS_DLLS = (
     APP_BASE_DIR / "UE4SS.dll",
     APP_BASE_DIR / "tools" / "ue4ss" / "UE4SS.dll",
@@ -628,11 +638,13 @@ class Configurator(tk.Tk):
         self.minsize(min(980, width), min(680, height))
 
         self.app_dir = APP_BASE_DIR
-        self.builds_dir = self.app_dir / "builds"
-        self.backups_dir = self.app_dir / "backups"
-        self.runtime_dir = self.app_dir / "runtime_mods"
+        self.state_dir = APP_STATE_DIR
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.builds_dir = self.state_dir / "builds"
+        self.backups_dir = self.state_dir / "backups"
+        self.runtime_dir = self.state_dir / "runtime_mods"
         self.profiles_dir = self.app_dir / "profiles" if IS_BUNDLED_APP else self.app_dir / "config" / "profiles"
-        self.app_log = self.app_dir / "configurator.log"
+        self.app_log = self.state_dir / "configurator.log"
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
 
         self.setting_vars = {spec.key: tk.StringVar(value=display_multiplier(1)) for spec in SETTINGS}
@@ -967,6 +979,7 @@ class Configurator(tk.Tk):
             return {}
 
     def write_user_settings(self, settings: dict) -> None:
+        USER_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
         USER_SETTINGS_PATH.write_text(json.dumps(settings, indent=4) + "\n", encoding="utf-8")
 
     def locate_steam_libraries(self) -> list[Path]:
@@ -1627,8 +1640,7 @@ class Configurator(tk.Tk):
                 parent=self,
             ):
                 return
-            for relative in ("backups", "runtime_mods"):
-                target = self.app_dir / relative
+            for target in (self.backups_dir, self.runtime_dir, self.builds_dir):
                 if target.exists():
                     shutil.rmtree(target)
                     self.log(f"Removed local folder: {target}")

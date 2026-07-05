@@ -17,7 +17,9 @@ Open source: https://github.com/ZSG-Studios/IcarusConfigMod
 
 The release is portable for players. It does not require Python, PowerShell scripts, batch files, Visual Studio, CMake, Rust, Nuitka, or PyInstaller on the player's system.
 
-If Icarus is not found automatically, the configurator prompts the player to select the Icarus folder or `Icarus\Binaries\Win64` and saves that path locally in `user_settings.json`.
+If Icarus is not found automatically, the configurator prompts the player to select the Icarus folder or `Icarus\Binaries\Win64` and saves that path under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\user_settings.json`.
+
+Backups, logs, and generated runtime work files are also stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\` instead of beside the portable exe or inside the extracted program folder.
 
 ## Player Package Layout
 
@@ -75,7 +77,7 @@ If `GreenLight=NO`, check nearby `SETTING_STATUS` lines to see which active sett
 - `tools/dll/src/` - UE4SS C++ runtime source.
 - `tools/dll/include/` - runtime headers.
 
-Generated folders such as `dist/`, `builds/`, `backups/`, `recovery/`, `runtime_mods/`, `tools/dll/out/`, `tools/dll/ue4ss_build/`, `tools/exe_build/`, and `tools/package_work/` are ignored for source sharing.
+Generated folders such as `dist/`, `builds/`, `backups/`, `recovery/`, `runtime_mods/`, `tools/dll/out/`, `tools/dll/ue4ss_build/`, `tools/exe_build/`, and `tools/package_work/` are ignored for source sharing. Player-side mutable state is written to `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\`.
 
 ## Developer Setup
 

@@ -97,11 +97,12 @@ def generate_package() -> Path:
     interp = tk.Tcl()
     app = object.__new__(configurator.Configurator)
     app.app_dir = APP_DIR
+    app.state_dir = PACKAGE_WORK_DIR
     app.builds_dir = package_builds_dir
-    app.backups_dir = APP_DIR / "backups"
-    app.runtime_dir = APP_DIR / "runtime_mods"
+    app.backups_dir = PACKAGE_WORK_DIR / "backups"
+    app.runtime_dir = PACKAGE_WORK_DIR / "runtime_mods"
     app.profiles_dir = SOURCE_PROFILES_DIR
-    app.app_log = APP_DIR / "configurator.log"
+    app.app_log = PACKAGE_WORK_DIR / "configurator.log"
     app.setting_vars = {spec.key: tk.StringVar(interp, value=configurator.display_multiplier(1)) for spec in configurator.SETTINGS}
     app.direct_vars = {
         spec.key: tk.StringVar(interp, value=configurator.display_multiplier(spec.default) if configurator.is_direct_multiplier(spec) else spec.default)

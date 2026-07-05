@@ -41,10 +41,10 @@
         "starter_biomass": "0",
         "starter_uranium": "0",
         "starter_licence": "0",
-        "lucky_strike_chance": "1"
+        "lucky_strike_chance": "1.5"
     },
     "curve_settings": {
-        "player_talent_growth": "6",
+        "player_talent_growth": "6.5",
         "solo_talent_growth": "1.75",
         "player_blueprint_growth": "3.25",
         "mount_talent_growth": "2",

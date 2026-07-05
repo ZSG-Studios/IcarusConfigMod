@@ -16,6 +16,16 @@ def find_app_dir() -> Path:
 
 
 APP_DIR = find_app_dir()
+
+
+def user_state_dir() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "ZSG Studios" / "IcarusConfigMod"
+    return Path.home() / "AppData" / "Local" / "ZSG Studios" / "IcarusConfigMod"
+
+
+APP_STATE_DIR = user_state_dir()
 MOD_NAMES = ("Configuration_Mod",)
 UE4SS_SAMPLE_MOD_NAMES = (
     "ActorDumperMod",
@@ -66,8 +76,10 @@ def remove_path(path: Path) -> None:
 
 
 def clean_local() -> None:
-    for relative in ("backups", r"tools\ue4ss"):
+    for relative in (r"tools\ue4ss",):
         remove_path(APP_DIR / relative)
+    for relative in ("backups", "builds", "runtime_mods", "configurator.log", "user_settings.json"):
+        remove_path(APP_STATE_DIR / relative)
     for cache in APP_DIR.rglob("__pycache__"):
         remove_path(cache)
     (APP_DIR / "config" / "profiles").mkdir(parents=True, exist_ok=True)

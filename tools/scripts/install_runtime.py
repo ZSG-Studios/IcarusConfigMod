@@ -37,6 +37,16 @@ BUNDLED_UE4SS_DLLS = (
     APP_DIR / "tools" / "dll" / "out" / "UE4SS.dll",
 )
 
+
+def user_state_dir() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "ZSG Studios" / "IcarusConfigMod"
+    return Path.home() / "AppData" / "Local" / "ZSG Studios" / "IcarusConfigMod"
+
+
+APP_STATE_DIR = user_state_dir()
+
 UE4SS_BUILTIN_MODS_TO_DISABLE = {
     "CheatManagerEnablerMod",
     "ActorDumperMod",
@@ -68,7 +78,7 @@ def run(arguments: list[str], cwd: Path | None = None) -> None:
 
 
 def backup_path(original: Path) -> Path:
-    target = APP_DIR / "backups" / "runtime_setup" / datetime.now().strftime("%Y%m%d_%H%M%S") / original.name
+    target = APP_STATE_DIR / "backups" / "runtime_setup" / datetime.now().strftime("%Y%m%d_%H%M%S") / original.name
     target.parent.mkdir(parents=True, exist_ok=True)
     return target
 
@@ -300,11 +310,12 @@ def generate_runtime_package(profile_path: Path) -> Path:
     interp = tk.Tcl()
     app = object.__new__(configurator.Configurator)
     app.app_dir = APP_DIR
-    app.builds_dir = APP_DIR / "builds"
-    app.backups_dir = APP_DIR / "backups"
-    app.runtime_dir = APP_DIR / "runtime_mods"
+    app.state_dir = APP_STATE_DIR
+    app.builds_dir = APP_STATE_DIR / "builds"
+    app.backups_dir = APP_STATE_DIR / "backups"
+    app.runtime_dir = APP_STATE_DIR / "runtime_mods"
     app.profiles_dir = SOURCE_PROFILES_DIR
-    app.app_log = APP_DIR / "configurator.log"
+    app.app_log = APP_STATE_DIR / "configurator.log"
     app.setting_vars = {spec.key: tk.StringVar(interp, value=configurator.display_multiplier(1)) for spec in configurator.SETTINGS}
     app.direct_vars = {
         spec.key: tk.StringVar(interp, value=configurator.display_multiplier(spec.default) if configurator.is_direct_multiplier(spec) else spec.default)
