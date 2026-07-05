@@ -9,7 +9,7 @@ Use this before uploading a beta package.
 - Run `python tools\scripts\package_release.py`.
 - Confirm `dist\IcarusConfigMod.zip` was updated.
 - Confirm the player zip contains no `.bat`, `.ps1`, or player-side `.py` launch scripts.
-- Confirm the staged player folder does not contain generated `backups`, `builds`, `runtime_mods`, `tools`, or `configurator.log`.
+- Confirm the staged player folder does not contain generated `backups`, `builds`, `runtime_mods`, `tools`, `configurator.log`, `user_settings.json`, or `Configuration_Mod/dlls`.
 - Source-only root `.bat` wrappers are allowed in Git, but must not appear in `dist`.
 
 ## Package Contents
@@ -20,6 +20,7 @@ The player zip should include:
 - `UE4SS.dll`
 - `main.dll`
 - `PLAYER_README.txt`
+- `README.md` copied from `docs/PLAYER_README.md`
 - `profiles/Premade_Configuration.json`
 - `Configuration_Mod/settings.ini`
 - `Configuration_Mod/runtime_config.json`
@@ -30,6 +31,7 @@ The player zip should not include:
 - `recovery/`
 - `backups/`
 - `configurator.log`
+- `user_settings.json`
 - `__pycache__/`
 - `tools/dll/ue4ss_build/`
 - `Setup.bat`
@@ -42,6 +44,7 @@ The player zip should not include:
 - `Configuration_Mod/dlls/`
 - `tools/scripts/`
 - `tools/ue4ss/`
+- `Configuration_Mod/dlls/`
 - local Icarus save files
 
 ## In-App Checks
@@ -50,6 +53,7 @@ The player zip should not include:
 - Dropdown also shows `Premade_Configuration`.
 - Dropdown entries do not show `.json`.
 - Clicking install while vanilla is selected shows a clean message instead of a traceback.
+- If Icarus is not found automatically, clicking install prompts for the Icarus folder or `Icarus\Binaries\Win64`.
 - Imported or saved profiles are copied into `profiles/` and appear in the dropdown.
 
 ## Runtime Checks

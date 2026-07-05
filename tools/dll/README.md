@@ -1,8 +1,8 @@
 # Configuration_Mod UE4SS C++ DLL
 
-This is the developer-only DLL source for the DLL-only player mod.
+This is the developer-only DLL source for the DLL-only runtime mod.
 
-The player package installs this shape:
+UE4SS requires this installed game mod shape:
 
 ```text
 Mods/
@@ -40,5 +40,7 @@ ship-ready DLL to:
 tools\dll\out\main.dll
 ```
 
-The release packager copies only the compiled DLL into `builds` and `dist`.
+The release packager ships `main.dll` at the player package root for a clean download layout.
+The configurator copies that root `main.dll` into `Configuration_Mod\dlls\main.dll` when installing into the game.
+
 Players do not receive the UE4SS C++ template, build cache, headers, or source.

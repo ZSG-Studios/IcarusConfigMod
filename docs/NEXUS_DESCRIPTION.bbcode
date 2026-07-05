@@ -1,0 +1,138 @@
+[heading]Overview[/heading]
+[url=https://github.com/ZSG-Studios/IcarusConfigMod]Open Source: ZSG-Studios/IcarusConfigMod[/url]
+
+[b]Icarus Configuration Mod[/b] is a UE4SS C++ runtime configuration mod for [b]Icarus[/b]. It gives players a profile-based configurator for changing balance settings without manually editing game files.
+
+The mod ships with [b]Vanilla Defaults[/b] and [b]Premade_Configuration[/b]. Players can also save or import custom profiles, which are copied into the local profiles folder and shown directly in the dropdown without messy .json names.
+
+This mod is built for configurable balance testing. It can adjust progression, resource gain, crafting speed, selected recipe/reward values, growth curves, and movement air control through a portable Windows configurator backed by a UE4SS C++ DLL.
+
+[heading]What This Mod Does[/heading]
+[list]
+[*]Runs from [b]IcarusConfigMod.exe[/b]. No player-side Python, batch files, PowerShell scripts, Visual Studio, CMake, Rust, or PyInstaller required.[/*]
+[*]Installs a UE4SS C++ runtime mod into the Icarus Win64 folder.[/*]
+[*]Prompts for the Icarus folder if the game is not detected automatically.[/*]
+[*]Starts on [b]Vanilla Defaults[/b] so first launch is clean and safe.[/*]
+[*]Includes one premade balance profile: [b]Premade_Configuration[/b].[/*]
+[*]Lets players create, save, import, and reuse custom profiles.[/*]
+[*]Writes selected settings into a unified runtime config.[/*]
+[*]Applies supported settings in-game through the DLL backend.[/*]
+[*]Writes validation logs so players can confirm active settings applied.[/*]
+[/list]
+
+[heading]Main Configurable Areas[/heading]
+[b]Progression[/b]
+[list]
+[*]XP reward multipliers[/*]
+[*]Crafting XP multiplier[/*]
+[*]Player, solo, blueprint, mount, and pet talent growth curve multipliers[/*]
+[/list]
+
+[b]Gathering and Resources[/b]
+[list]
+[*]Mining speed, mining yield, and ore density[/*]
+[*]Wood, skinning, and reaping yield[/*]
+[*]Crop growth speed and fishing speed[/*]
+[/list]
+
+[b]Crafting and Recipes[/b]
+[list]
+[*]Processing speed for supported processor recipes[/*]
+[*]Material efficiency for processor recipe input arrays[/*]
+[*]Recipe output quantity groups[/*]
+[*]Free crafting option for processor recipe input arrays[/*]
+[/list]
+
+[b]Rewards, Inventory, and Movement[/b]
+[list]
+[*]Mission currency and XP reward group multipliers[/*]
+[*]Stack size groups, container slot groups, and backpack slot multiplier[/*]
+[*]Air control multiplier applied at runtime to loaded movement components[/*]
+[/list]
+
+[heading]Runtime Validation[/heading]
+The mod includes runtime validation logging. This helps players and testers confirm whether active settings were actually applied in-game.
+
+The runtime log reports each setting as:
+[list]
+[*][b]applied[/b] - the active setting found its target and changed values.[/*]
+[*][b]inactive[/b] - the setting is at vanilla/default value and was not applied.[/*]
+[*][b]partial[/b] - some targets applied, but some fields or targets were missing.[/*]
+[*][b]pending[/b] - the setting is waiting for the game to load the needed target.[/*]
+[*][b]skipped[/b] - the setting was active but skipped by validation logic.[/*]
+[*][b]unsupported[/b] - the setting is available in the UI but does not yet have a verified runtime target.[/*]
+[/list]
+
+For a clean validation pass, look for:
+[code]VALIDATION GreenLight ... GreenLight=YES[/code]
+
+A clean pass should also show:
+[code]Partial=0 Pending=0 Skipped=0 Unsupported=0 MissingFields=0[/code]
+
+If [b]GreenLight=NO[/b], check nearby [b]SETTING_STATUS[/b] lines to see which active setting needs attention.
+
+[heading]Important Safety Notes[/heading]
+[list]
+[*]Always back up saves before using inventory, stack, slot, backpack, free-craft, or recipe-array options.[/*]
+[*]Lowering inventory or container slot values below current contents can risk item loss.[/*]
+[*]Changing recipe inputs or outputs can affect crafting balance heavily.[/*]
+[*]Some advanced options may appear in the configurator with warnings for testing purposes.[/*]
+[*]The validator is designed to avoid fake green passes.[/*]
+[/list]
+
+[heading]Installation Instructions[/heading]
+[list=1]
+[*]Download the release zip from the Files tab.[/*]
+[*]Extract the zip anywhere outside the Icarus install folder.[/*]
+[*]Run [b]IcarusConfigMod.exe[/b].[/*]
+[*]Select [b]Vanilla Defaults[/b], [b]Premade_Configuration[/b], or import/create a custom profile.[/*]
+[*]Click the install/apply button in the configurator.[/*]
+[*]If prompted, select your Icarus folder or [b]Icarus\Binaries\Win64[/b].[/*]
+[*]Fully close and restart Icarus.[/*]
+[*]Enter a session/prospect so the game loads the required runtime tables.[/*]
+[*]Check the runtime validation log if you want to confirm a clean pass.[/*]
+[/list]
+
+[heading]Included Files[/heading]
+[list]
+[*][b]IcarusConfigMod.exe[/b] - portable Windows configurator and installer.[/*]
+[*][b]UE4SS.dll[/b] - bundled UE4SS runtime DLL used by the installer.[/*]
+[*][b]main.dll[/b] - compiled Configuration_Mod UE4SS C++ runtime DLL.[/*]
+[*][b]Configuration_Mod/[/b] - runtime config, manifest, settings, and enabled marker.[/*]
+[*][b]profiles/Premade_Configuration.json[/b] - included premade profile.[/*]
+[*][b]README.md[/b], [b]PLAYER_README.txt[/b], and [b]LICENSE[/b].[/*]
+[/list]
+
+[heading]Requirements[/heading]
+[list]
+[*]Icarus on Steam[/*]
+[*]Windows[/*]
+[*]No separate Python install required for players[/*]
+[*]No batch or PowerShell scripts required for players[/*]
+[*]Administrator permission may be required depending on where Steam/Icarus is installed[/*]
+[/list]
+
+[heading]Uninstall / Reset[/heading]
+Open [b]IcarusConfigMod.exe[/b] and use [b]Reset Installed Mod[/b] from the console/actions area. You can also return to [b]Vanilla Defaults[/b] before removing the mod.
+
+[heading]Custom Profiles[/heading]
+[list]
+[*]Use the configurator to save a profile.[/*]
+[*]Imported profiles are copied into the local profiles folder.[/*]
+[*]Profiles then appear directly in the profile dropdown.[/*]
+[*]The dropdown shows clean names without .json.[/*]
+[/list]
+
+[heading]Known Notes[/heading]
+[list]
+[*]Vanilla Defaults is intentionally the first selected option on first launch.[/*]
+[*]Premade_Configuration is the included balance preset.[/*]
+[*]Runtime validation happens after Icarus loads enough game data.[/*]
+[*]If you change settings while Icarus is running, fully restart the game before judging results.[/*]
+[/list]
+
+[heading]Third-Party Credits[/heading]
+Built with UE4SS / RE-UE4SS and the UE4SS C++ Mod Template. UE4SS uses third-party dependencies including ImGui, glfw, glad, Zydis, PolyHook 2, asmjit, fmt, Tracy, and glaze. The configurator uses Python and Tkinter. All third-party tools and libraries remain credited to their respective authors and maintainers.
+
+[heading]Shout Outs[/heading]
+Thanks to the UE4SS team for the runtime modding framework and documentation. Thanks also to the Icarus modding community for testing, examples, and the groundwork that makes runtime balance tools possible.

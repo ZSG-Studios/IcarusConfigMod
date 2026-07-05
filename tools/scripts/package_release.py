@@ -142,7 +142,7 @@ def stage_release(package: Path, exe: Path) -> Path:
         shutil.rmtree(DIST_DIR)
     DIST_DIR.mkdir(parents=True)
     copy_file(exe, DIST_DIR / "IcarusConfigMod.exe")
-    copy_file(APP_DIR / "README.md", DIST_DIR / "README.md")
+    copy_file(APP_DIR / "docs" / "PLAYER_README.md", DIST_DIR / "README.md")
     copy_file(APP_DIR / "LICENSE", DIST_DIR / "LICENSE")
     shutil.copytree(SOURCE_PROFILES_DIR, DIST_DIR / "profiles")
     shutil.copytree(package, DIST_DIR / package.name, ignore=shutil.ignore_patterns("dlls"))
