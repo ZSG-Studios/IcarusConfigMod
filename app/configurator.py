@@ -642,6 +642,7 @@ class Configurator(tk.Tk):
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.builds_dir = self.state_dir / "builds"
         self.backups_dir = self.state_dir / "backups"
+        self.save_backups_dir = self.state_dir / "save_backups"
         self.runtime_dir = self.state_dir / "runtime_mods"
         self.profiles_dir = self.app_dir / "profiles" if IS_BUNDLED_APP else self.app_dir / "config" / "profiles"
         self.app_log = self.state_dir / "configurator.log"
@@ -666,6 +667,9 @@ class Configurator(tk.Tk):
         self.group_master_vars: dict[str, tk.StringVar] = {}
         self.range_label_vars: dict[str, tk.StringVar] = {}
         self.console_text: tk.Text | None = None
+        self.save_backup_listbox: tk.Listbox | None = None
+        self.save_backup_entries: list[Path] = []
+        self.save_backup_summary_var = tk.StringVar(value="No save backups loaded")
 
         self.build_ui()
         self.refresh_profile_choices()
@@ -766,6 +770,8 @@ class Configurator(tk.Tk):
             category_frames[category] = outer
             category_content[category] = content
             category_rows[category] = 0
+
+        self.add_save_backup_tab(notebook)
 
         console_outer = ttk.Frame(notebook, padding=10, style="App.TFrame")
         notebook.add(console_outer, text="Console")
@@ -878,6 +884,43 @@ class Configurator(tk.Tk):
             variable.trace_add("write", lambda *_args: self.update_summary())
         for variable in self.runtime_vars.values():
             variable.trace_add("write", lambda *_args: self.update_summary())
+
+    def add_save_backup_tab(self, notebook: ttk.Notebook) -> None:
+        outer = ttk.Frame(notebook, padding=10, style="App.TFrame")
+        notebook.add(outer, text="Save Backups")
+        actions = ttk.Frame(outer, style="App.TFrame")
+        actions.pack(fill=tk.X, pady=(0, 8))
+        ttk.Button(actions, text="Create Backup", style="Primary.TButton", command=self.create_manual_save_backup).pack(side=tk.LEFT)
+        ttk.Button(actions, text="Restore Selected", style="Soft.TButton", command=self.restore_selected_save_backup).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(actions, text="Refresh", style="Soft.TButton", command=self.refresh_save_backup_list).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(actions, text="Open Backup Folder", style="Soft.TButton", command=self.open_save_backup_folder).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Label(outer, textvariable=self.save_backup_summary_var, style="Hud.TLabel").pack(anchor=tk.W, pady=(0, 8))
+
+        body = ttk.Frame(outer, style="App.TFrame")
+        body.pack(fill=tk.BOTH, expand=True)
+        self.save_backup_listbox = tk.Listbox(
+            body,
+            height=18,
+            background="#050a0d",
+            foreground=UI_TEXT,
+            selectbackground=UI_TEAL_DARK,
+            selectforeground=UI_TEXT,
+            relief=tk.FLAT,
+            borderwidth=0,
+            activestyle="none",
+            font=("Consolas", 10),
+        )
+        scrollbar = ttk.Scrollbar(body, orient=tk.VERTICAL, command=self.save_backup_listbox.yview)
+        self.save_backup_listbox.configure(yscrollcommand=scrollbar.set)
+        self.save_backup_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        ttk.Label(
+            outer,
+            text="Backups include Icarus Saved\\PlayerData, Saved\\SaveGames, Saved\\ExtraData, and steam_autocloud.vdf when present. Applying configuration creates an automatic backup first.",
+            style="CardText.TLabel",
+            wraplength=920,
+        ).pack(anchor=tk.W, pady=(8, 0))
+        self.refresh_save_backup_list()
 
     def add_group_card(self, parent: ttk.Frame, rows: dict[str, int], group: NativeGroupSpec) -> None:
         row = rows[group.category]
@@ -1240,6 +1283,211 @@ class Configurator(tk.Tk):
             os.startfile(runtime_mod)
         except Exception as error:
             self.show_error("Open runtime folder failed", error)
+
+    def icarus_saved_dir(self) -> Path:
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+        return base / "Icarus" / "Saved"
+
+    def save_backup_components(self) -> tuple[str, ...]:
+        return ("PlayerData", "SaveGames", "ExtraData", "steam_autocloud.vdf")
+
+    def safe_reason_slug(self, reason: str) -> str:
+        slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", reason.strip()).strip("._")
+        return slug or "manual"
+
+    def directory_stats(self, path: Path) -> tuple[int, int]:
+        if path.is_file():
+            return 1, path.stat().st_size
+        count = 0
+        total = 0
+        for item in path.rglob("*"):
+            if item.is_file():
+                count += 1
+                total += item.stat().st_size
+        return count, total
+
+    def format_bytes(self, size: int) -> str:
+        value = float(size)
+        for unit in ("B", "KB", "MB", "GB"):
+            if value < 1024 or unit == "GB":
+                return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+            value /= 1024
+        return f"{size} B"
+
+    def create_save_backup(self, reason: str = "manual", silent: bool = False) -> Path:
+        processes = self.running_icarus_processes()
+        if processes:
+            raise RuntimeError(
+                "Close Icarus before creating or restoring save backups. Running processes: "
+                + ", ".join(processes)
+            )
+        source_root = self.icarus_saved_dir()
+        if not source_root.is_dir():
+            raise FileNotFoundError(f"Icarus save folder was not found: {source_root}")
+        existing_components = [name for name in self.save_backup_components() if (source_root / name).exists()]
+        if not existing_components:
+            raise FileNotFoundError(f"No supported Icarus save files were found in: {source_root}")
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        target = self.save_backups_dir / f"{stamp}_{self.safe_reason_slug(reason)}"
+        suffix = 2
+        while target.exists():
+            target = self.save_backups_dir / f"{stamp}_{self.safe_reason_slug(reason)}_{suffix}"
+            suffix += 1
+        saved_target = target / "Saved"
+        saved_target.mkdir(parents=True, exist_ok=False)
+
+        copied: list[str] = []
+        file_count = 0
+        byte_count = 0
+        for name in existing_components:
+            source = source_root / name
+            destination = saved_target / name
+            if source.is_dir():
+                shutil.copytree(source, destination)
+            else:
+                shutil.copy2(source, destination)
+            copied.append(name)
+            files, size = self.directory_stats(destination)
+            file_count += files
+            byte_count += size
+
+        manifest = {
+            "schema": 1,
+            "created": datetime.now().isoformat(timespec="seconds"),
+            "reason": reason,
+            "source": str(source_root),
+            "components": copied,
+            "file_count": file_count,
+            "total_bytes": byte_count,
+        }
+        (target / "manifest.json").write_text(json.dumps(manifest, indent=4) + "\n", encoding="utf-8")
+        self.log(
+            f"Created Icarus save backup {target} "
+            f"({file_count} files, {self.format_bytes(byte_count)}, components: {', '.join(copied)})"
+        )
+        self.refresh_save_backup_list()
+        if not silent:
+            self.status_var.set(f"Created save backup: {target.name}")
+            messagebox.showinfo(APP_NAME, f"Created save backup:\n{target}", parent=self)
+        return target
+
+    def create_manual_save_backup(self) -> None:
+        try:
+            self.create_save_backup("manual")
+        except Exception as error:
+            self.show_error("Save backup failed", error)
+
+    def auto_backup_saves_before_apply(self) -> Path | None:
+        try:
+            backup = self.create_save_backup("before_apply", silent=True)
+            self.status_var.set(f"Created save backup before apply: {backup.name}")
+            return backup
+        except FileNotFoundError as error:
+            self.log(f"WARNING: Save backup skipped before apply: {error}")
+            return None
+
+    def save_backup_manifest(self, backup: Path) -> dict[str, Any]:
+        manifest_path = backup / "manifest.json"
+        if not manifest_path.is_file():
+            return {}
+        try:
+            return json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return {}
+
+    def available_save_backups(self) -> list[Path]:
+        if not self.save_backups_dir.is_dir():
+            return []
+        return sorted(
+            [path for path in self.save_backups_dir.iterdir() if path.is_dir() and (path / "Saved").is_dir()],
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+
+    def refresh_save_backup_list(self) -> None:
+        self.save_backup_entries = self.available_save_backups()
+        if self.save_backup_listbox is not None:
+            self.save_backup_listbox.delete(0, tk.END)
+            for backup in self.save_backup_entries:
+                manifest = self.save_backup_manifest(backup)
+                count = manifest.get("file_count", "?")
+                size = manifest.get("total_bytes")
+                size_text = self.format_bytes(size) if isinstance(size, int) else "unknown size"
+                created = manifest.get("created", backup.name)
+                reason = manifest.get("reason", "")
+                self.save_backup_listbox.insert(tk.END, f"{backup.name} | {created} | {reason} | {count} files | {size_text}")
+        save_root = self.icarus_saved_dir()
+        self.save_backup_summary_var.set(
+            f"Save folder: {save_root}    Backup folder: {self.save_backups_dir}    Backups: {len(self.save_backup_entries)}"
+        )
+
+    def selected_save_backup(self) -> Path:
+        if self.save_backup_listbox is None:
+            raise RuntimeError("Save backup list is not available")
+        selection = self.save_backup_listbox.curselection()
+        if not selection:
+            raise RuntimeError("Select a save backup first")
+        return self.save_backup_entries[int(selection[0])]
+
+    def remove_existing_save_component(self, path: Path, save_root: Path) -> None:
+        resolved_root = save_root.resolve()
+        resolved_path = path.resolve()
+        if resolved_path != resolved_root and resolved_root not in resolved_path.parents:
+            raise RuntimeError(f"Refusing to remove path outside Icarus Saved folder: {path}")
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
+            path.unlink()
+
+    def restore_selected_save_backup(self) -> None:
+        try:
+            backup = self.selected_save_backup()
+            processes = self.running_icarus_processes()
+            if processes:
+                raise RuntimeError(
+                    "Close Icarus before restoring save backups. Running processes: "
+                    + ", ".join(processes)
+                )
+            saved_source = backup / "Saved"
+            if not saved_source.is_dir():
+                raise FileNotFoundError(f"Backup is missing Saved folder: {saved_source}")
+            components = [path for path in saved_source.iterdir() if path.name in self.save_backup_components()]
+            if not components:
+                raise FileNotFoundError(f"Backup has no supported save components: {saved_source}")
+            if not messagebox.askyesno(
+                APP_NAME,
+                "Restore this Icarus save backup?\n\n"
+                "The app will create a pre-restore backup first, then replace matching PlayerData/SaveGames/ExtraData files.",
+                parent=self,
+            ):
+                return
+            self.create_save_backup("pre_restore", silent=True)
+            save_root = self.icarus_saved_dir()
+            save_root.mkdir(parents=True, exist_ok=True)
+            restored: list[str] = []
+            for source in components:
+                target = save_root / source.name
+                self.remove_existing_save_component(target, save_root)
+                if source.is_dir():
+                    shutil.copytree(source, target)
+                else:
+                    shutil.copy2(source, target)
+                restored.append(source.name)
+            self.log(f"Restored Icarus save backup {backup} to {save_root} ({', '.join(restored)})")
+            self.status_var.set(f"Restored save backup: {backup.name}")
+            self.refresh_save_backup_list()
+            messagebox.showinfo(APP_NAME, f"Restored save backup:\n{backup.name}", parent=self)
+        except Exception as error:
+            self.show_error("Save restore failed", error)
+
+    def open_save_backup_folder(self) -> None:
+        try:
+            self.save_backups_dir.mkdir(parents=True, exist_ok=True)
+            os.startfile(self.save_backups_dir)
+        except Exception as error:
+            self.show_error("Open save backup folder failed", error)
 
     def runtime_mods_root(self, win64_dir: Path) -> Path:
         modern = win64_dir / "ue4ss"
@@ -1692,6 +1940,7 @@ class Configurator(tk.Tk):
                 self.refresh_console()
                 messagebox.showinfo(APP_NAME, message, parent=self)
                 return
+            self.auto_backup_saves_before_apply()
             win64_dir = self.game_win64_dir(prompt=True)
             if not win64_dir.is_dir():
                 raise FileNotFoundError(f"Could not find Icarus Win64 folder: {win64_dir}")

@@ -146,12 +146,15 @@ def stage_release(package: Path, app_bundle: Path) -> Path:
     (DIST_DIR / "PLAYER_README.txt").write_text(
         "Run IcarusConfigMod.exe to edit profiles, install the UE4SS runtime mod, or reset installed files.\n"
         "This player package ships a portable configurator and prebuilt UE4SS C++ DLL runtime.\n"
+        "Applying configuration creates an automatic Icarus player/world save backup first.\n"
+        "Use the Save Backups tab to create, list, open, and restore save backups.\n"
+        "Close Icarus before creating or restoring save backups.\n"
         "No player-side Python install, build step, batch file, or PowerShell script is required.\n",
         encoding="utf-8",
     )
     for cache in DIST_DIR.rglob("__pycache__"):
         shutil.rmtree(cache)
-    for generated in (DIST_DIR / "backups", DIST_DIR / "builds", DIST_DIR / "runtime_mods"):
+    for generated in (DIST_DIR / "backups", DIST_DIR / "builds", DIST_DIR / "runtime_mods", DIST_DIR / "save_backups"):
         if generated.exists():
             shutil.rmtree(generated)
     app_log = DIST_DIR / "configurator.log"

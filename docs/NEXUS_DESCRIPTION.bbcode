@@ -15,6 +15,8 @@ This mod is built for configurable balance testing. It can adjust progression, r
 [*]Starts on [b]Vanilla Defaults[/b] so first launch is clean and safe.[/*]
 [*]Includes one premade balance profile: [b]Premade_Configuration[/b].[/*]
 [*]Lets players create, save, import, and reuse custom profiles.[/*]
+[*]Creates an automatic player/world save backup before applying configuration changes.[/*]
+[*]Includes a Save Backups tab for manual backup, restore, refresh, and opening the backup folder.[/*]
 [*]Writes selected settings into a unified runtime config.[/*]
 [*]Applies supported settings in-game through the DLL backend.[/*]
 [*]Writes validation logs so players can confirm active settings applied.[/*]
@@ -73,12 +75,26 @@ If [b]GreenLight=NO[/b], check nearby [b]SETTING_STATUS[/b] lines to see which a
 
 [heading]Important Safety Notes[/heading]
 [list]
-[*]Always back up saves before using inventory, stack, slot, backpack, free-craft, or recipe-array options.[/*]
+[*]The configurator automatically backs up saves before applying settings.[/*]
+[*]Manual extra backups are still recommended before using inventory, stack, slot, backpack, free-craft, or recipe-array options.[/*]
 [*]Lowering inventory or container slot values below current contents can risk item loss.[/*]
 [*]Changing recipe inputs or outputs can affect crafting balance heavily.[/*]
 [*]Some advanced options may appear in the configurator with warnings for testing purposes.[/*]
 [*]The validator is designed to avoid fake green passes.[/*]
 [/list]
+
+[heading]Save Backups[/heading]
+The [b]Save Backups[/b] tab manages Icarus player/world save backups. Backups are stored under [b]%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\save_backups[/b], not inside the extracted mod folder.
+
+When present, backups include:
+[list]
+[*][b]Saved\PlayerData[/b][/*]
+[*][b]Saved\SaveGames[/b][/*]
+[*][b]Saved\ExtraData[/b][/*]
+[*][b]Saved\steam_autocloud.vdf[/b][/*]
+[/list]
+
+Every apply creates a [b]before_apply[/b] backup first. Restoring a backup creates a [b]pre_restore[/b] backup before replacing matching save components. Close Icarus before creating or restoring backups so the app does not copy or replace live save files.
 
 [heading]Installation Instructions[/heading]
 [list=1]
@@ -87,6 +103,7 @@ If [b]GreenLight=NO[/b], check nearby [b]SETTING_STATUS[/b] lines to see which a
 [*]Run [b]IcarusConfigMod.exe[/b].[/*]
 [*]Select [b]Vanilla Defaults[/b], [b]Premade_Configuration[/b], or import/create a custom profile.[/*]
 [*]Click the install/apply button in the configurator.[/*]
+[*]The configurator creates a player/world save backup before applying.[/*]
 [*]If prompted, select your Icarus folder or [b]Icarus\Binaries\Win64[/b].[/*]
 [*]Fully close and restart Icarus.[/*]
 [*]Enter a session/prospect so the game loads the required runtime tables.[/*]

@@ -8,9 +8,10 @@ Portable UE4SS C++ runtime configuration mod for Icarus.
 2. Run `IcarusConfigMod.exe`.
 3. Select `Vanilla Defaults`, `Premade_Configuration`, or a saved/imported custom profile.
 4. Click the install/apply button.
-5. If prompted, select your Icarus folder or `Icarus\Binaries\Win64`.
-6. Fully close and restart Icarus.
-7. Enter a prospect/session so Icarus loads the runtime tables.
+5. The app creates an automatic player/world save backup before applying.
+6. If prompted, select your Icarus folder or `Icarus\Binaries\Win64`.
+7. Fully close and restart Icarus.
+8. Enter a prospect/session so Icarus loads the runtime tables.
 
 No Python, batch files, PowerShell scripts, Visual Studio, CMake, Rust, Nuitka, or PyInstaller are required for players.
 
@@ -30,7 +31,7 @@ LICENSE
 
 `main.dll` is shipped at the package root for a clean download layout. The configurator installs it into the UE4SS-required game layout when applying settings.
 
-Backups, logs, saved Icarus folder selection, and generated runtime work files are stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\`, not in the extracted mod folder.
+Runtime backups, player/world save backups, logs, saved Icarus folder selection, and generated runtime work files are stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\`, not in the extracted mod folder.
 
 ## Profiles
 
@@ -53,6 +54,12 @@ Partial=0 Pending=0 Skipped=0 Unsupported=0 MissingFields=0
 
 Open `IcarusConfigMod.exe` and use `Reset Installed Mod` from the console/actions area.
 
+## Save Backups
+
+Use the `Save Backups` tab to create, list, open, and restore Icarus save backups. The app backs up `Saved\PlayerData`, `Saved\SaveGames`, `Saved\ExtraData`, and `steam_autocloud.vdf` when they exist.
+
+Every apply creates a `before_apply` backup. Restoring a backup creates a `pre_restore` backup first. Close Icarus before creating or restoring backups.
+
 ## Safety
 
-Back up saves before using inventory, stack, slot, backpack, free-craft, or recipe-array options. Lowering inventory or container slots below current contents can risk item loss.
+The app backs up saves before applying, but manual extra backups are still recommended before using inventory, stack, slot, backpack, free-craft, or recipe-array options. Lowering inventory or container slots below current contents can risk item loss.

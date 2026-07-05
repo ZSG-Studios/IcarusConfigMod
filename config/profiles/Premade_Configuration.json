@@ -44,7 +44,7 @@
         "lucky_strike_chance": "1.5"
     },
     "curve_settings": {
-        "player_talent_growth": "6.5",
+        "player_talent_growth": "6.75",
         "solo_talent_growth": "1.75",
         "player_blueprint_growth": "3.25",
         "mount_talent_growth": "2",

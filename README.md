@@ -11,15 +11,16 @@ Open source: https://github.com/ZSG-Studios/IcarusConfigMod
 3. Run `IcarusConfigMod.exe`.
 4. Select `Vanilla Defaults`, `Premade_Configuration`, or a saved/imported custom profile.
 5. Click the install/apply button in the configurator.
-6. Fully close and restart Icarus.
-7. Enter a prospect/session so Icarus loads the runtime tables.
-8. Check the runtime validation log from the configurator if you want to confirm a clean pass.
+6. The configurator creates an automatic player/world save backup before applying.
+7. Fully close and restart Icarus.
+8. Enter a prospect/session so Icarus loads the runtime tables.
+9. Check the runtime validation log from the configurator if you want to confirm a clean pass.
 
 The release is portable for players. It does not require Python, PowerShell scripts, batch files, Visual Studio, CMake, Rust, Nuitka, or PyInstaller on the player's system.
 
 If Icarus is not found automatically, the configurator prompts the player to select the Icarus folder or `Icarus\Binaries\Win64` and saves that path under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\user_settings.json`.
 
-Backups, logs, and generated runtime work files are also stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\` instead of beside the portable exe or inside the extracted program folder.
+Runtime backups, player/world save backups, logs, and generated runtime work files are stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\` instead of beside the portable exe or inside the extracted program folder.
 
 ## Player Package Layout
 
@@ -63,6 +64,19 @@ Partial=0 Pending=0 Skipped=0 Unsupported=0 MissingFields=0
 
 If `GreenLight=NO`, check nearby `SETTING_STATUS` lines to see which active setting needs attention.
 
+## Save Backups
+
+The configurator has a `Save Backups` tab for Icarus player/world saves. It backs up these save components when present:
+
+- `%LOCALAPPDATA%\Icarus\Saved\PlayerData`
+- `%LOCALAPPDATA%\Icarus\Saved\SaveGames`
+- `%LOCALAPPDATA%\Icarus\Saved\ExtraData`
+- `%LOCALAPPDATA%\Icarus\Saved\steam_autocloud.vdf`
+
+Every apply creates a `before_apply` backup first. Players can also create manual backups, open the backup folder, refresh the backup list, and restore a selected backup from the UI. Backup restore creates a `pre_restore` backup before replacing matching save components.
+
+Backup and restore refuse to run while Icarus is open so the app does not copy or replace live save files.
+
 ## Source Layout
 
 - `app/configurator.py` - Tkinter configurator and runtime installer.
@@ -77,7 +91,7 @@ If `GreenLight=NO`, check nearby `SETTING_STATUS` lines to see which active sett
 - `tools/dll/src/` - UE4SS C++ runtime source.
 - `tools/dll/include/` - runtime headers.
 
-Generated folders such as `dist/`, `builds/`, `backups/`, `recovery/`, `runtime_mods/`, `tools/dll/out/`, `tools/dll/ue4ss_build/`, `tools/exe_build/`, and `tools/package_work/` are ignored for source sharing. Player-side mutable state is written to `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\`.
+Generated folders such as `dist/`, `builds/`, `backups/`, `recovery/`, `runtime_mods/`, `save_backups/`, `tools/dll/out/`, `tools/dll/ue4ss_build/`, `tools/exe_build/`, and `tools/package_work/` are ignored for source sharing. Player-side mutable state is written to `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\`.
 
 ## Developer Setup
 
