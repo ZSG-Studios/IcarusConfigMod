@@ -30,6 +30,17 @@ BUNDLED_UE4SS_DLLS = (
     Path(__file__).resolve().parent / "tools" / "dll" / "out" / "UE4SS.dll",
 )
 
+UI_BG = "#071014"
+UI_PANEL = "#10191d"
+UI_PANEL_ALT = "#142226"
+UI_BORDER = "#25444a"
+UI_TEAL = "#56d7d9"
+UI_TEAL_DARK = "#1b6f72"
+UI_AMBER = "#f2a93b"
+UI_TEXT = "#e8f2f0"
+UI_MUTED = "#9fb3b0"
+UI_STATUS = "#0b1418"
+
 
 @dataclass(frozen=True)
 class SettingSpec:
@@ -640,28 +651,43 @@ class Configurator(tk.Tk):
         style = ttk.Style(self)
         if "clam" in style.theme_names():
             style.theme_use("clam")
-        self.configure(background="#eef2f6")
-        style.configure("App.TFrame", background="#eef2f6")
-        style.configure("Header.TFrame", background="#17324d")
-        style.configure("Title.TLabel", background="#17324d", foreground="white", font=("Segoe UI", 19, "bold"))
-        style.configure("Subtitle.TLabel", background="#17324d", foreground="#d8e6f3", font=("Segoe UI", 10))
-        style.configure("Card.TLabelframe", background="white", relief="solid", borderwidth=1)
-        style.configure("Card.TLabelframe.Label", background="white", foreground="#17324d", font=("Segoe UI", 10, "bold"))
-        style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), padding=(14, 8))
-        style.configure("Soft.TButton", padding=(10, 6))
+        self.configure(background=UI_BG)
+        style.configure("App.TFrame", background=UI_BG)
+        style.configure("Panel.TFrame", background=UI_PANEL)
+        style.configure("Header.TFrame", background=UI_BG)
+        style.configure("Title.TLabel", background=UI_BG, foreground=UI_TEXT, font=("Segoe UI", 22, "bold"))
+        style.configure("Subtitle.TLabel", background=UI_BG, foreground=UI_TEAL, font=("Segoe UI", 10))
+        style.configure("Hud.TLabel", background=UI_BG, foreground=UI_MUTED, font=("Segoe UI", 9))
+        style.configure("CardText.TLabel", background=UI_PANEL, foreground=UI_MUTED, font=("Segoe UI", 9))
+        style.configure("CardHead.TLabel", background=UI_PANEL, foreground=UI_TEXT, font=("Segoe UI", 9, "bold"))
+        style.configure("Summary.TLabel", background=UI_BG, foreground=UI_TEAL)
+        style.configure("Status.TLabel", background=UI_STATUS, foreground=UI_AMBER, relief=tk.FLAT, padding=(8, 4))
+        style.configure("Card.TLabelframe", background=UI_PANEL, bordercolor=UI_BORDER, lightcolor=UI_BORDER, darkcolor=UI_BORDER, relief="solid", borderwidth=1)
+        style.configure("Card.TLabelframe.Label", background=UI_PANEL, foreground=UI_TEAL, font=("Segoe UI", 10, "bold"))
+        style.configure("TNotebook", background=UI_BG, borderwidth=0)
+        style.configure("TNotebook.Tab", background=UI_PANEL_ALT, foreground=UI_MUTED, padding=(14, 7), font=("Segoe UI", 9, "bold"))
+        style.map("TNotebook.Tab", background=[("selected", UI_PANEL)], foreground=[("selected", UI_TEAL)])
+        style.configure("TCombobox", fieldbackground="#0b1518", background=UI_PANEL_ALT, foreground=UI_TEXT, arrowcolor=UI_TEAL, bordercolor=UI_BORDER, lightcolor=UI_BORDER, darkcolor=UI_BORDER)
+        style.configure("TEntry", fieldbackground="#0b1518", foreground=UI_TEXT, bordercolor=UI_BORDER, lightcolor=UI_BORDER, darkcolor=UI_BORDER)
+        style.configure("TCheckbutton", background=UI_PANEL, foreground=UI_TEXT)
+        style.map("TCheckbutton", background=[("active", UI_PANEL)], foreground=[("active", UI_TEAL)])
+        style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), padding=(16, 9), background=UI_AMBER, foreground="#071014", bordercolor=UI_AMBER)
+        style.map("Primary.TButton", background=[("active", "#ffc057")], foreground=[("active", "#071014")])
+        style.configure("Soft.TButton", padding=(10, 6), background=UI_PANEL_ALT, foreground=UI_TEAL, bordercolor=UI_BORDER)
+        style.map("Soft.TButton", background=[("active", UI_TEAL_DARK)], foreground=[("active", UI_TEXT)])
 
-        header = ttk.Frame(self, padding=14, style="Header.TFrame")
+        header = ttk.Frame(self, padding=(18, 16, 18, 12), style="Header.TFrame")
         header.pack(fill=tk.X)
-        ttk.Label(header, text="Icarus Balance Configurator", style="Title.TLabel").pack(anchor=tk.W)
+        ttk.Label(header, text="Icarus Configuration Mod", style="Title.TLabel").pack(anchor=tk.W)
         ttk.Label(
             header,
-            text="One clear control per system - unified INI - UE4SS C++ DLL install path",
+            text="Profiles  -  Balance Tuning  -  Runtime Validation",
             style="Subtitle.TLabel",
         ).pack(anchor=tk.W, pady=(2, 0))
 
         actions = ttk.Frame(self, padding=(12, 10, 12, 8), style="App.TFrame")
         actions.pack(fill=tk.X)
-        ttk.Label(actions, text="Profile:").pack(side=tk.LEFT)
+        ttk.Label(actions, text="Profile:", style="Hud.TLabel").pack(side=tk.LEFT)
         self.profile_combo = ttk.Combobox(actions, textvariable=self.profile_var, state="readonly", width=26)
         self.profile_combo.pack(side=tk.LEFT, padx=(6, 4))
         self.profile_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_selected_profile())
@@ -672,7 +698,7 @@ class Configurator(tk.Tk):
             f"{len(SETTINGS) + len(DIRECT_SETTINGS) + len(CURVE_SETTINGS) + sum(len(group.ranges) for group in NATIVE_GROUPS)} INI controls"
             f" + {len(RUNTIME_SETTINGS)} runtime controls"
         )
-        ttk.Label(actions, text=parity, foreground="#35617f").pack(side=tk.RIGHT, padx=(0, 18))
+        ttk.Label(actions, text=parity, style="Hud.TLabel").pack(side=tk.RIGHT, padx=(0, 18))
 
         notebook = ttk.Notebook(self)
         self.notebook = notebook
@@ -689,7 +715,7 @@ class Configurator(tk.Tk):
         for category in categories:
             outer = ttk.Frame(notebook)
             notebook.add(outer, text=category)
-            canvas = tk.Canvas(outer, highlightthickness=0, background="#eef2f6")
+            canvas = tk.Canvas(outer, highlightthickness=0, background=UI_BG)
             scrollbar = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview)
             content = ttk.Frame(canvas, padding=10, style="App.TFrame")
             window = canvas.create_window((0, 0), window=content, anchor="nw")
@@ -709,7 +735,7 @@ class Configurator(tk.Tk):
         ttk.Button(console_actions, text="Refresh Logs", style="Soft.TButton", command=self.refresh_console).pack(side=tk.LEFT)
         ttk.Button(console_actions, text="Clear App Log", style="Soft.TButton", command=self.clear_app_log).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(console_actions, text="Open Runtime Folder", style="Soft.TButton", command=self.open_runtime_folder).pack(side=tk.LEFT, padx=(6, 0))
-        self.console_text = tk.Text(console_outer, height=20, wrap=tk.WORD, font=("Consolas", 9))
+        self.console_text = tk.Text(console_outer, height=20, wrap=tk.WORD, font=("Consolas", 9), background="#050a0d", foreground=UI_TEXT, insertbackground=UI_TEAL, selectbackground=UI_TEAL_DARK, relief=tk.FLAT, borderwidth=0)
         console_scroll = ttk.Scrollbar(console_outer, orient=tk.VERTICAL, command=self.console_text.yview)
         self.console_text.configure(yscrollcommand=console_scroll.set)
         self.console_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -720,9 +746,9 @@ class Configurator(tk.Tk):
             category = "Survival" if spec.category == "Player" else spec.category
             parent = category_content[category]
             row = category_rows[category]
-            card = ttk.LabelFrame(parent, text=spec.label + ("  ⚠" if spec.caution else ""), style="Card.TLabelframe", padding=10)
+            card = ttk.LabelFrame(parent, text=spec.label + ("  [!]" if spec.caution else ""), style="Card.TLabelframe", padding=10)
             card.grid(row=row, column=0, sticky="ew", pady=(0, 8))
-            ttk.Label(card, text=spec.description, wraplength=720, background="white", foreground="#4c5a67").grid(row=0, column=0, sticky="w")
+            ttk.Label(card, text=spec.description, wraplength=720, style="CardText.TLabel").grid(row=0, column=0, sticky="w")
             combo = ttk.Combobox(card, textvariable=self.setting_vars[spec.key], values=choices, width=10)
             combo.grid(row=0, column=1, sticky="e", padx=(16, 0))
             combo.bind("<<ComboboxSelected>>", lambda _event: self.update_summary())
@@ -736,7 +762,7 @@ class Configurator(tk.Tk):
             row = category_rows[spec.category]
             card = ttk.LabelFrame(parent, text=spec.label, style="Card.TLabelframe", padding=10)
             card.grid(row=row, column=0, sticky="ew", pady=(0, 8))
-            ttk.Label(card, text=spec.description, wraplength=720, background="white", foreground="#4c5a67").grid(row=0, column=0, sticky="w")
+            ttk.Label(card, text=spec.description, wraplength=720, style="CardText.TLabel").grid(row=0, column=0, sticky="w")
             variable = self.direct_vars[spec.key]
             if spec.choices == ("0", "1"):
                 ttk.Checkbutton(card, variable=variable, onvalue="1", offvalue="0").grid(row=0, column=1, sticky="e", padx=(16, 0))
@@ -760,7 +786,7 @@ class Configurator(tk.Tk):
             title = spec.label if CURVE_RUNTIME_ENABLED else f"{spec.label} (unsupported)"
             card = ttk.LabelFrame(parent, text=title, style="Card.TLabelframe", padding=10)
             card.grid(row=row, column=0, sticky="ew", pady=(0, 8))
-            ttk.Label(card, text=spec.description, wraplength=720, background="white", foreground="#4c5a67").grid(row=0, column=0, sticky="w")
+            ttk.Label(card, text=spec.description, wraplength=720, style="CardText.TLabel").grid(row=0, column=0, sticky="w")
             combo_state = "normal" if CURVE_RUNTIME_ENABLED else "disabled"
             combo = ttk.Combobox(card, textvariable=self.curve_vars[spec.key], values=multiplier_choices(("0.5", "0.75", "1", "1.25", "1.5", "2", "3", "5", "7.5", "10")), width=10, state=combo_state)
             combo.grid(row=0, column=1, sticky="e", padx=(16, 0))
@@ -775,7 +801,7 @@ class Configurator(tk.Tk):
             row = category_rows[spec.category]
             card = ttk.LabelFrame(parent, text=spec.label, style="Card.TLabelframe", padding=10)
             card.grid(row=row, column=0, sticky="ew", pady=(0, 8))
-            ttk.Label(card, text=spec.description, wraplength=720, background="white", foreground="#4c5a67").grid(row=0, column=0, sticky="w")
+            ttk.Label(card, text=spec.description, wraplength=720, style="CardText.TLabel").grid(row=0, column=0, sticky="w")
             combo = ttk.Combobox(card, textvariable=self.runtime_vars[spec.key], values=multiplier_choices(spec.choices), width=10)
             combo.grid(row=0, column=1, sticky="e", padx=(16, 0))
             combo.bind("<<ComboboxSelected>>", lambda _event: self.update_summary())
@@ -789,8 +815,8 @@ class Configurator(tk.Tk):
 
         footer = ttk.Frame(self, padding=(12, 0, 12, 8), style="App.TFrame")
         footer.pack(fill=tk.X)
-        ttk.Label(footer, textvariable=self.summary_var, foreground="#333333").pack(anchor=tk.W, pady=(0, 6))
-        build_row = ttk.Frame(footer)
+        ttk.Label(footer, textvariable=self.summary_var, style="Summary.TLabel").pack(anchor=tk.W, pady=(0, 6))
+        build_row = ttk.Frame(footer, style="App.TFrame")
         build_row.pack(fill=tk.X)
         ttk.Button(build_row, text="Preview All", style="Soft.TButton", command=self.preview).pack(side=tk.LEFT)
         ttk.Button(build_row, text="Apply Configuration", style="Primary.TButton", command=self.apply_configuration).pack(side=tk.RIGHT)
@@ -798,9 +824,9 @@ class Configurator(tk.Tk):
         if self.developer_tools_available():
             ttk.Button(build_row, text="Build DLL Mod Files", style="Soft.TButton", command=self.build_runtime_mod_files).pack(side=tk.RIGHT, padx=(0, 8))
             ttk.Entry(build_row, textvariable=self.mod_name_var, width=32).pack(side=tk.RIGHT, padx=(0, 8))
-            ttk.Label(build_row, text="Mod name:").pack(side=tk.RIGHT)
+            ttk.Label(build_row, text="Mod name:", style="Hud.TLabel").pack(side=tk.RIGHT)
 
-        ttk.Label(self, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W, padding=(6, 3)).pack(
+        ttk.Label(self, textvariable=self.status_var, style="Status.TLabel", anchor=tk.W).pack(
             fill=tk.X, side=tk.BOTTOM
         )
         for variables in self.native_group_vars.values():
@@ -821,15 +847,15 @@ class Configurator(tk.Tk):
             f"{group.description} Ranges are fixed native filters based on the vanilla value in "
             f"{group.file}; only the multiplier is editable."
         )
-        ttk.Label(card, text=description, wraplength=680, background="white", foreground="#4c5a67").grid(row=0, column=0, sticky="w")
+        ttk.Label(card, text=description, wraplength=680, style="CardText.TLabel").grid(row=0, column=0, sticky="w")
         variables = self.native_group_vars[group.key]
         current = [variable.get() for variable in variables]
         master = tk.StringVar(value=(current[0] if len(set(current)) == 1 else "Custom"))
         self.group_master_vars[group.key] = master
-        ttk.Label(card, text="Overall multiplier", background="white", foreground="#4c5a67").grid(row=0, column=1, padx=(12, 4))
+        ttk.Label(card, text="Overall multiplier", style="CardText.TLabel").grid(row=0, column=1, padx=(12, 4))
         combo = ttk.Combobox(card, textvariable=master, values=multiplier_choices(("0.5", "0.75", "1", "1.5", "2", "3", "5", "7.5", "10")), width=10)
         combo.grid(row=0, column=2, padx=(4, 6))
-        details = ttk.Frame(card)
+        details = ttk.Frame(card, style="Panel.TFrame")
         visible = tk.BooleanVar(value=False)
         toggle = ttk.Button(card, text="Fine tune", width=13)
         toggle.grid(row=0, column=3)
@@ -856,19 +882,19 @@ class Configurator(tk.Tk):
                 details.grid_remove()
 
         toggle.configure(command=toggle_details)
-        ttk.Label(details, text="Fixed vanilla range", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 4))
-        ttk.Label(details, text="Multiplier", font=("Segoe UI", 9, "bold")).grid(row=0, column=1, sticky="e", pady=(0, 4))
+        ttk.Label(details, text="Fixed vanilla range", style="CardHead.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 4))
+        ttk.Label(details, text="Multiplier", style="CardHead.TLabel").grid(row=0, column=1, sticky="e", pady=(0, 4))
         for index, ((minimum, maximum), variable) in enumerate(zip(group.ranges, variables), start=1):
             key = f"{group.key}{index}"
             wording_var = tk.StringVar(value=range_row_wording(group.key, str(minimum), str(maximum)))
             self.range_label_vars[key] = wording_var
-            ttk.Label(details, textvariable=wording_var, wraplength=620).grid(row=index, column=0, sticky="w", pady=2)
+            ttk.Label(details, textvariable=wording_var, wraplength=620, style="CardText.TLabel").grid(row=index, column=0, sticky="w", pady=2)
             entry = ttk.Entry(details, textvariable=variable, width=10)
             entry.grid(row=index, column=1, sticky="e", padx=(8, 0), pady=2)
             entry.bind("<FocusOut>", lambda _e, p=group.key: self.refresh_group_master(p))
         if group.exclude_name_patterns:
             text = "Built-in exclusions: " + ", ".join(group.exclude_name_patterns)
-            ttk.Label(details, text=text, wraplength=650, foreground="#555555").grid(row=len(group.ranges) + 1, column=0, columnspan=2, sticky="w", pady=(8, 2))
+            ttk.Label(details, text=text, wraplength=650, style="CardText.TLabel").grid(row=len(group.ranges) + 1, column=0, columnspan=2, sticky="w", pady=(8, 2))
         details.columnconfigure(0, weight=1)
         details.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(10, 0))
         details.grid_remove()
