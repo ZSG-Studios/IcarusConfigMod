@@ -25,7 +25,7 @@ UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 RUNTIME_MOD_FOLDER = "Configuration_Mod"
 RUNTIME_INI_NAME = "settings.ini"
 CURVE_RUNTIME_ENABLED = True
-APP_BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+APP_BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
 BUNDLED_UE4SS_DLLS = (
     APP_BASE_DIR / "UE4SS.dll",
     APP_BASE_DIR / "tools" / "ue4ss" / "UE4SS.dll",
@@ -621,7 +621,7 @@ class Configurator(tk.Tk):
         self.builds_dir = self.app_dir / "builds"
         self.backups_dir = self.app_dir / "backups"
         self.runtime_dir = self.app_dir / "runtime_mods"
-        self.profiles_dir = self.app_dir / "profiles"
+        self.profiles_dir = self.app_dir / "profiles" if getattr(sys, "frozen", False) else self.app_dir / "config" / "profiles"
         self.app_log = self.app_dir / "configurator.log"
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
 

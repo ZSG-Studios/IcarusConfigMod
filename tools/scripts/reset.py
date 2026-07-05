@@ -10,9 +10,9 @@ SCRIPT_PATH = Path(__file__).resolve()
 
 def find_app_dir() -> Path:
     for candidate in (SCRIPT_PATH.parent, *SCRIPT_PATH.parents):
-        if (candidate / "configurator.py").is_file():
+        if (candidate / "app" / "configurator.py").is_file():
             return candidate
-    raise FileNotFoundError("Could not find configurator.py from reset script location")
+    raise FileNotFoundError("Could not find app/configurator.py from reset script location")
 
 
 APP_DIR = find_app_dir()
@@ -70,8 +70,7 @@ def clean_local() -> None:
         remove_path(APP_DIR / relative)
     for cache in APP_DIR.rglob("__pycache__"):
         remove_path(cache)
-    (APP_DIR / "builds").mkdir(exist_ok=True)
-    (APP_DIR / "profiles").mkdir(exist_ok=True)
+    (APP_DIR / "config" / "profiles").mkdir(parents=True, exist_ok=True)
 
 
 def clean_game() -> None:
@@ -104,7 +103,7 @@ def main() -> int:
     try:
         clean_local()
         clean_game()
-        print("Reset complete. Run Setup.bat for a fresh install.")
+        print("Reset complete. Run the configurator or package_release.py for a fresh install/package.")
         return 0
     except Exception as error:
         print(f"ERROR: {error}", file=sys.stderr)

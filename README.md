@@ -22,8 +22,11 @@ Saved or imported player profiles are copied into `profiles/` and then appear in
 
 ## Source Layout
 
-- `configurator.py` - Tkinter configuration app and runtime package writer.
-- `profiles/` - shipped and user-created profile JSON files.
+- `app/configurator.py` - Tkinter configuration app and runtime package writer.
+- `config/profiles/` - shipped source profile JSON files.
+- `docs/RELEASE_CHECKLIST.md` - beta packaging checklist.
+- `Dev Setup.bat`, `Build DLL.bat`, `Package Release.bat` - source-only convenience wrappers.
+- `tools/scripts/dev_setup.py` - developer environment checker and safe dependency bootstrap.
 - `tools/scripts/install_runtime.py` - developer/player setup script retained for source builds.
 - `tools/scripts/package_release.py` - developer release packager.
 - `tools/scripts/build_dll.py` - developer DLL build helper.
@@ -32,7 +35,7 @@ Saved or imported player profiles are copied into `profiles/` and then appear in
 
 Generated folders such as `builds/`, `dist/`, `backups/`, `recovery/`, `runtime_mods/`, `tools/dll/out/`, and `tools/dll/ue4ss_build/` are ignored for source sharing.
 
-## Developer Build
+## Developer Setup
 
 Requirements:
 
@@ -41,6 +44,29 @@ Requirements:
 - CMake.
 - Git.
 - Rust toolchain, required by the UE4SS C++ template dependencies.
+- PyInstaller, used only for building the portable player exe.
+
+Check the local environment:
+
+```powershell
+python tools\scripts\dev_setup.py
+```
+
+Install safe missing dependencies where the script can automate it:
+
+```powershell
+python tools\scripts\dev_setup.py --install
+```
+
+Some system tools may still need manual install if Windows does not already have them:
+
+```powershell
+winget install --id Git.Git -e
+winget install --id Kitware.CMake -e
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e
+```
+
+## Developer Build
 
 Build the DLL:
 
@@ -54,6 +80,8 @@ Package the player release:
 python tools\scripts\package_release.py
 ```
 
+Optional source-only batch wrappers are also available at the repo root for developers who prefer double-click or `cmd.exe` workflows: `Dev Setup.bat`, `Build DLL.bat`, and `Package Release.bat`. They are not copied into the player zip.
+
 The player zip is written to:
 
 ```text
@@ -61,6 +89,18 @@ dist\IcarusConfigMod.zip
 ```
 
 The player zip is portable and ships `IcarusConfigMod.exe`; no player-side Python install, batch file, PowerShell script, or build step is required.
+
+The player zip layout is intentionally flatter than the source tree:
+
+```text
+IcarusConfigMod.exe
+UE4SS.dll
+Configuration_Mod/
+profiles/
+README.md
+PLAYER_README.txt
+LICENSE
+```
 
 ## Runtime Validation
 

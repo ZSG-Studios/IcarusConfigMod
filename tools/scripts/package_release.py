@@ -11,17 +11,21 @@ SCRIPT_PATH = Path(__file__).resolve()
 
 def find_app_dir() -> Path:
     for candidate in (SCRIPT_PATH.parent, *SCRIPT_PATH.parents):
-        if (candidate / "configurator.py").is_file():
+        if (candidate / "app" / "configurator.py").is_file():
             return candidate
-    raise FileNotFoundError("Could not find configurator.py from packaging script location")
+    raise FileNotFoundError("Could not find app/configurator.py from packaging script location")
 
 
 APP_DIR = find_app_dir()
-if str(APP_DIR) not in sys.path:
-    sys.path.insert(0, str(APP_DIR))
+APP_SOURCE_DIR = APP_DIR / "app"
+SOURCE_PROFILES_DIR = APP_DIR / "config" / "profiles"
+for import_path in (APP_SOURCE_DIR, APP_DIR):
+    if str(import_path) not in sys.path:
+        sys.path.insert(0, str(import_path))
 
 DIST_DIR = APP_DIR / "dist" / "IcarusConfigMod"
 EXE_WORK_DIR = APP_DIR / "tools" / "exe_build"
+PACKAGE_WORK_DIR = APP_DIR / "tools" / "package_work"
 
 
 def run(arguments: list[str]) -> None:
@@ -77,7 +81,7 @@ def build_configurator_exe() -> Path:
             str(EXE_WORK_DIR / "work"),
             "--specpath",
             str(EXE_WORK_DIR),
-            str(APP_DIR / "configurator.py"),
+            str(APP_SOURCE_DIR / "configurator.py"),
         ]
     )
     exe = EXE_WORK_DIR / "dist" / "IcarusConfigMod.exe"
@@ -90,15 +94,18 @@ def generate_package() -> Path:
     import tkinter as tk
     import configurator
 
-    profile_path = APP_DIR / "profiles" / "Premade_Configuration.json"
+    if PACKAGE_WORK_DIR.exists():
+        shutil.rmtree(PACKAGE_WORK_DIR)
+    package_builds_dir = PACKAGE_WORK_DIR / "builds"
+    profile_path = SOURCE_PROFILES_DIR / "Premade_Configuration.json"
     profile = json.loads(profile_path.read_text(encoding="utf-8-sig"))
     interp = tk.Tcl()
     app = object.__new__(configurator.Configurator)
     app.app_dir = APP_DIR
-    app.builds_dir = APP_DIR / "builds"
+    app.builds_dir = package_builds_dir
     app.backups_dir = APP_DIR / "backups"
     app.runtime_dir = APP_DIR / "runtime_mods"
-    app.profiles_dir = APP_DIR / "profiles"
+    app.profiles_dir = SOURCE_PROFILES_DIR
     app.app_log = APP_DIR / "configurator.log"
     app.setting_vars = {spec.key: tk.StringVar(interp, value=configurator.display_multiplier(1)) for spec in configurator.SETTINGS}
     app.direct_vars = {
@@ -119,7 +126,7 @@ def generate_package() -> Path:
     app.log = lambda message: None
     app.show_error = lambda title, error: (_ for _ in ()).throw(error)
     configurator.Configurator.apply_profile_data(app, profile)
-    package = configurator.Configurator.write_runtime_mod_package(app, APP_DIR / "builds")
+    package = configurator.Configurator.write_runtime_mod_package(app, package_builds_dir)
     if not (package / "dlls" / "main.dll").is_file():
         raise FileNotFoundError(f"Generated package missing DLL runtime: {package}")
     return package
@@ -137,7 +144,7 @@ def stage_release(package: Path, exe: Path) -> Path:
     copy_file(exe, DIST_DIR / "IcarusConfigMod.exe")
     copy_file(APP_DIR / "README.md", DIST_DIR / "README.md")
     copy_file(APP_DIR / "LICENSE", DIST_DIR / "LICENSE")
-    shutil.copytree(APP_DIR / "profiles", DIST_DIR / "profiles")
+    shutil.copytree(SOURCE_PROFILES_DIR, DIST_DIR / "profiles")
     shutil.copytree(package, DIST_DIR / package.name)
     copy_file(APP_DIR / "tools" / "dll" / "out" / "UE4SS.dll", DIST_DIR / "UE4SS.dll")
     (DIST_DIR / "PLAYER_README.txt").write_text(

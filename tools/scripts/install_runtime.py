@@ -17,16 +17,19 @@ SCRIPT_PATH = Path(__file__).resolve()
 
 def find_app_dir() -> Path:
     for candidate in (SCRIPT_PATH.parent, *SCRIPT_PATH.parents):
-        if (candidate / "configurator.py").is_file():
+        if (candidate / "app" / "configurator.py").is_file():
             return candidate
-    raise FileNotFoundError("Could not find configurator.py from setup script location")
+    raise FileNotFoundError("Could not find app/configurator.py from setup script location")
 
 
 APP_DIR = find_app_dir()
-if str(APP_DIR) not in sys.path:
-    sys.path.insert(0, str(APP_DIR))
+APP_SOURCE_DIR = APP_DIR / "app"
+SOURCE_PROFILES_DIR = APP_DIR / "config" / "profiles"
+for import_path in (APP_SOURCE_DIR, APP_DIR):
+    if str(import_path) not in sys.path:
+        sys.path.insert(0, str(import_path))
 RUNTIME_MOD_FOLDER = "Configuration_Mod"
-DEFAULT_PROFILE = APP_DIR / "profiles" / "Premade_Configuration.json"
+DEFAULT_PROFILE = SOURCE_PROFILES_DIR / "Premade_Configuration.json"
 DEFAULT_MOD_NAME = RUNTIME_MOD_FOLDER
 UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 BUNDLED_UE4SS_DLLS = (
@@ -300,7 +303,7 @@ def generate_runtime_package(profile_path: Path) -> Path:
     app.builds_dir = APP_DIR / "builds"
     app.backups_dir = APP_DIR / "backups"
     app.runtime_dir = APP_DIR / "runtime_mods"
-    app.profiles_dir = APP_DIR / "profiles"
+    app.profiles_dir = SOURCE_PROFILES_DIR
     app.app_log = APP_DIR / "configurator.log"
     app.setting_vars = {spec.key: tk.StringVar(interp, value=configurator.display_multiplier(1)) for spec in configurator.SETTINGS}
     app.direct_vars = {

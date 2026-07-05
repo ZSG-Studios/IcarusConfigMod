@@ -28,8 +28,8 @@ Do not ship a plain `DllMain` DLL. UE4SS rejects that form with
 
 Run:
 
-```bat
-tools\scripts\Build DLL.bat
+```powershell
+python tools\scripts\build_dll.py
 ```
 
 The script clones/updates the official UE4SS C++ template under

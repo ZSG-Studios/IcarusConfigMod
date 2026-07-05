@@ -4,10 +4,13 @@ Use this before uploading a beta package.
 
 ## Build
 
-- Run `python -m py_compile configurator.py tools\scripts\install_runtime.py tools\scripts\package_release.py tools\scripts\reset.py`.
+- Run `python tools\scripts\dev_setup.py`.
+- Run `python -m py_compile app\configurator.py tools\scripts\install_runtime.py tools\scripts\package_release.py tools\scripts\reset.py`.
 - Run `python tools\scripts\package_release.py`.
 - Confirm `dist\IcarusConfigMod.zip` was updated.
 - Confirm the player zip contains no `.bat`, `.ps1`, or player-side `.py` launch scripts.
+- Confirm the staged player folder does not contain generated `backups`, `builds`, `runtime_mods`, `tools`, or `configurator.log`.
+- Source-only root `.bat` wrappers are allowed in Git, but must not appear in `dist`.
 
 ## Package Contents
 
@@ -34,6 +37,8 @@ The player zip should not include:
 - `Reset.bat`
 - `configurator.py`
 - `builds/`
+- `runtime_mods/`
+- `tools/`
 - `tools/scripts/`
 - `tools/ue4ss/`
 - local Icarus save files

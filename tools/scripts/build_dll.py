@@ -11,9 +11,9 @@ SCRIPT_PATH = Path(__file__).resolve()
 
 def find_app_dir() -> Path:
     for candidate in (SCRIPT_PATH.parent, *SCRIPT_PATH.parents):
-        if (candidate / "configurator.py").is_file():
+        if (candidate / "app" / "configurator.py").is_file():
             return candidate
-    raise FileNotFoundError("Could not find configurator.py from DLL build script location")
+    raise FileNotFoundError("Could not find app/configurator.py from DLL build script location")
 
 
 APP_DIR = find_app_dir()
