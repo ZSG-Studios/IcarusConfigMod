@@ -95,6 +95,7 @@ The player zip layout is intentionally flatter than the source tree:
 ```text
 IcarusConfigMod.exe
 UE4SS.dll
+main.dll
 Configuration_Mod/
 profiles/
 README.md

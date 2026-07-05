@@ -1406,6 +1406,7 @@ class Configurator(tk.Tk):
         mod_dir = target_root / mod_name
         dlls_dir = mod_dir / "dlls"
         dll_candidates = (
+            self.app_dir / "main.dll",
             self.app_dir / "tools" / "dll" / "out" / "main.dll",
             self.app_dir / "builds" / RUNTIME_MOD_FOLDER / "dlls" / "main.dll",
         )

@@ -18,12 +18,12 @@ The player zip should include:
 
 - `IcarusConfigMod.exe`
 - `UE4SS.dll`
+- `main.dll`
 - `PLAYER_README.txt`
 - `profiles/Premade_Configuration.json`
 - `Configuration_Mod/settings.ini`
 - `Configuration_Mod/runtime_config.json`
 - `Configuration_Mod/option_manifest.json`
-- `Configuration_Mod/dlls/main.dll`
 
 The player zip should not include:
 
@@ -39,6 +39,7 @@ The player zip should not include:
 - `builds/`
 - `runtime_mods/`
 - `tools/`
+- `Configuration_Mod/dlls/`
 - `tools/scripts/`
 - `tools/ue4ss/`
 - local Icarus save files

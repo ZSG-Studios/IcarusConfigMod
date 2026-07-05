@@ -145,7 +145,8 @@ def stage_release(package: Path, exe: Path) -> Path:
     copy_file(APP_DIR / "README.md", DIST_DIR / "README.md")
     copy_file(APP_DIR / "LICENSE", DIST_DIR / "LICENSE")
     shutil.copytree(SOURCE_PROFILES_DIR, DIST_DIR / "profiles")
-    shutil.copytree(package, DIST_DIR / package.name)
+    shutil.copytree(package, DIST_DIR / package.name, ignore=shutil.ignore_patterns("dlls"))
+    copy_file(package / "dlls" / "main.dll", DIST_DIR / "main.dll")
     copy_file(APP_DIR / "tools" / "dll" / "out" / "UE4SS.dll", DIST_DIR / "UE4SS.dll")
     (DIST_DIR / "PLAYER_README.txt").write_text(
         "Run IcarusConfigMod.exe to edit profiles, install the UE4SS runtime mod, or reset installed files.\n"
