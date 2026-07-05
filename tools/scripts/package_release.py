@@ -138,10 +138,8 @@ def stage_release(package: Path, exe: Path) -> Path:
     copy_file(APP_DIR / "README.md", DIST_DIR / "README.md")
     copy_file(APP_DIR / "LICENSE", DIST_DIR / "LICENSE")
     shutil.copytree(APP_DIR / "profiles", DIST_DIR / "profiles")
-    shutil.copytree(package, DIST_DIR / "builds" / package.name)
-    ue4ss_target = DIST_DIR / "tools" / "ue4ss"
-    ue4ss_target.mkdir(parents=True, exist_ok=True)
-    copy_file(APP_DIR / "tools" / "dll" / "out" / "UE4SS.dll", ue4ss_target / "UE4SS.dll")
+    shutil.copytree(package, DIST_DIR / package.name)
+    copy_file(APP_DIR / "tools" / "dll" / "out" / "UE4SS.dll", DIST_DIR / "UE4SS.dll")
     (DIST_DIR / "PLAYER_README.txt").write_text(
         "Run IcarusConfigMod.exe to edit profiles, install the UE4SS runtime mod, or reset installed files.\n"
         "This player package ships a portable configurator and prebuilt UE4SS C++ DLL runtime.\n"

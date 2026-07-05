@@ -27,6 +27,7 @@ RUNTIME_INI_NAME = "settings.ini"
 CURVE_RUNTIME_ENABLED = True
 APP_BASE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 BUNDLED_UE4SS_DLLS = (
+    APP_BASE_DIR / "UE4SS.dll",
     APP_BASE_DIR / "tools" / "ue4ss" / "UE4SS.dll",
     APP_BASE_DIR / "tools" / "dll" / "out" / "UE4SS.dll",
 )
