@@ -40,6 +40,8 @@ UI_AMBER = "#f2a93b"
 UI_TEXT = "#e8f2f0"
 UI_MUTED = "#9fb3b0"
 UI_STATUS = "#0b1418"
+UI_INPUT_BG = "#dce8e6"
+UI_INPUT_TEXT = "#071014"
 
 
 @dataclass(frozen=True)
@@ -665,16 +667,30 @@ class Configurator(tk.Tk):
         style.configure("Card.TLabelframe", background=UI_PANEL, bordercolor=UI_BORDER, lightcolor=UI_BORDER, darkcolor=UI_BORDER, relief="solid", borderwidth=1)
         style.configure("Card.TLabelframe.Label", background=UI_PANEL, foreground=UI_TEAL, font=("Segoe UI", 10, "bold"))
         style.configure("TNotebook", background=UI_BG, borderwidth=0)
-        style.configure("TNotebook.Tab", background=UI_PANEL_ALT, foreground=UI_MUTED, padding=(14, 7), font=("Segoe UI", 9, "bold"))
-        style.map("TNotebook.Tab", background=[("selected", UI_PANEL)], foreground=[("selected", UI_TEAL)])
+        style.configure("TNotebook.Tab", background=UI_PANEL_ALT, foreground=UI_MUTED, padding=(13, 6), font=("Segoe UI", 9, "bold"))
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", UI_PANEL)],
+            foreground=[("selected", UI_TEAL)],
+            padding=[("selected", (18, 10))],
+        )
         style.configure("TCombobox", fieldbackground="#0b1518", background=UI_PANEL_ALT, foreground=UI_TEXT, arrowcolor=UI_TEAL, bordercolor=UI_BORDER, lightcolor=UI_BORDER, darkcolor=UI_BORDER)
+        style.map("TCombobox", fieldbackground=[("readonly", "#0b1518")], foreground=[("readonly", UI_TEXT)], selectbackground=[("readonly", "#0b1518")], selectforeground=[("readonly", UI_TEXT)])
+        style.configure("Profile.TCombobox", fieldbackground=UI_INPUT_BG, background=UI_INPUT_BG, foreground=UI_INPUT_TEXT, arrowcolor=UI_TEAL_DARK, bordercolor=UI_AMBER, lightcolor=UI_AMBER, darkcolor=UI_AMBER)
+        style.map("Profile.TCombobox", fieldbackground=[("readonly", UI_INPUT_BG)], foreground=[("readonly", UI_INPUT_TEXT)], selectbackground=[("readonly", UI_INPUT_BG)], selectforeground=[("readonly", UI_INPUT_TEXT)])
         style.configure("TEntry", fieldbackground="#0b1518", foreground=UI_TEXT, bordercolor=UI_BORDER, lightcolor=UI_BORDER, darkcolor=UI_BORDER)
         style.configure("TCheckbutton", background=UI_PANEL, foreground=UI_TEXT)
         style.map("TCheckbutton", background=[("active", UI_PANEL)], foreground=[("active", UI_TEAL)])
         style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), padding=(16, 9), background=UI_AMBER, foreground="#071014", bordercolor=UI_AMBER)
         style.map("Primary.TButton", background=[("active", "#ffc057")], foreground=[("active", "#071014")])
+        style.configure("TButton", padding=(10, 6), background=UI_PANEL_ALT, foreground=UI_TEAL, bordercolor=UI_BORDER)
+        style.map("TButton", background=[("active", UI_TEAL_DARK)], foreground=[("active", UI_TEXT)])
         style.configure("Soft.TButton", padding=(10, 6), background=UI_PANEL_ALT, foreground=UI_TEAL, bordercolor=UI_BORDER)
         style.map("Soft.TButton", background=[("active", UI_TEAL_DARK)], foreground=[("active", UI_TEXT)])
+        self.option_add("*TCombobox*Listbox.background", UI_INPUT_BG)
+        self.option_add("*TCombobox*Listbox.foreground", UI_INPUT_TEXT)
+        self.option_add("*TCombobox*Listbox.selectBackground", UI_TEAL_DARK)
+        self.option_add("*TCombobox*Listbox.selectForeground", UI_TEXT)
 
         header = ttk.Frame(self, padding=(18, 16, 18, 12), style="Header.TFrame")
         header.pack(fill=tk.X)
@@ -688,7 +704,7 @@ class Configurator(tk.Tk):
         actions = ttk.Frame(self, padding=(12, 10, 12, 8), style="App.TFrame")
         actions.pack(fill=tk.X)
         ttk.Label(actions, text="Profile:", style="Hud.TLabel").pack(side=tk.LEFT)
-        self.profile_combo = ttk.Combobox(actions, textvariable=self.profile_var, state="readonly", width=26)
+        self.profile_combo = ttk.Combobox(actions, textvariable=self.profile_var, state="readonly", width=30, style="Profile.TCombobox")
         self.profile_combo.pack(side=tk.LEFT, padx=(6, 4))
         self.profile_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_selected_profile())
         ttk.Button(actions, text="Import Profile", command=self.load_profile).pack(side=tk.RIGHT)
