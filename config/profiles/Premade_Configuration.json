@@ -3,11 +3,11 @@
     "mod_name": "Configuration_Mod",
     "settings": {
         "mining_speed": "10",
-        "mining_yield": "1.75",
-        "ore_density": "1.75",
-        "wood_yield": "1.75",
-        "skinning_yield": "1.75",
-        "reaping_yield": "1.75",
+        "mining_yield": "1.5",
+        "ore_density": "1.5",
+        "wood_yield": "1.5",
+        "skinning_yield": "1.5",
+        "reaping_yield": "1.5",
         "processing_speed": "2.5",
         "material_efficiency": "1",
         "crafting_xp": "5",
@@ -18,7 +18,7 @@
         "food_buff_duration": "1",
         "food_buff_potency": "1",
         "crop_speed": "5",
-        "fishing_speed": "5",
+        "fishing_speed": "2.5",
         "health": "1",
         "stamina": "1",
         "carry_capacity": "1",
@@ -44,9 +44,9 @@
         "lucky_strike_chance": "1"
     },
     "curve_settings": {
-        "player_talent_growth": "5.5",
-        "solo_talent_growth": "2",
-        "player_blueprint_growth": "3.5",
+        "player_talent_growth": "6",
+        "solo_talent_growth": "1.75",
+        "player_blueprint_growth": "3.25",
         "mount_talent_growth": "2",
         "pet_talent_growth": "2"
     },
