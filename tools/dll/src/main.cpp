@@ -237,16 +237,16 @@ const ArrayRangeGroupRule kArrayRangeGroupRules[] = {
 };
 
 const StatArrayRule kStatArrayRules[] = {
-    {"health", "D_CharacterStartingStats", "Stats", {"BaseMaximumHealth_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
-    {"stamina", "D_CharacterStartingStats", "Stats", {"BaseMaximumStamina_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
-    {"carry_capacity", "D_CharacterStartingStats", "Stats", {"BaseWeightCapacity_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
-    {"movement_speed", "D_CharacterStartingStats", "Stats", {"BaseMovementSpeed_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
-    {"health_regen", "D_CharacterStartingStats", "Stats", {"BaseHealthRegenPerMinute_+"}, NumericMode::Multiply, NumericResult::Nearest, 0.0},
-    {"stamina_regen", "D_CharacterStartingStats", "Stats", {"BaseStaminaRegenPerMinute_+"}, NumericMode::Multiply, NumericResult::Nearest, 0.0},
+    {"health", "D_CharacterStartingStats", "StatsGranted", {"BaseMaximumHealth_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
+    {"stamina", "D_CharacterStartingStats", "StatsGranted", {"BaseMaximumStamina_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
+    {"carry_capacity", "D_CharacterStartingStats", "StatsGranted", {"BaseWeightCapacity_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
+    {"movement_speed", "D_CharacterStartingStats", "StatsGranted", {"BaseMovementSpeed_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
+    {"health_regen", "D_CharacterStartingStats", "StatsGranted", {"BaseHealthRegenPerMinute_+"}, NumericMode::Multiply, NumericResult::Nearest, 0.0},
+    {"stamina_regen", "D_CharacterStartingStats", "StatsGranted", {"BaseStaminaRegenPerMinute_+"}, NumericMode::Multiply, NumericResult::Nearest, 0.0},
     {
         "needs_duration",
         "D_CharacterStartingStats",
-        "Stats",
+        "StatsGranted",
         {"BaseFoodConsumptionPerHour_+", "BaseWaterConsumptionPerHour_+", "BaseOxygenConsumptionPerHour_+"},
         NumericMode::Divide,
         NumericResult::Nearest,
@@ -420,6 +420,22 @@ RC::Unreal::FNumericProperty* find_first_numeric_property(
         }
     }
     for (auto* property : row_struct->ForEachPropertyInChain()) {
+        if (auto* numeric = as_numeric_property(property)) {
+            return numeric;
+        }
+    }
+    return nullptr;
+}
+
+RC::Unreal::FNumericProperty* find_named_numeric_property(
+    RC::Unreal::UStruct* row_struct,
+    const std::vector<const char*>& preferred_names
+) {
+    if (!row_struct) {
+        return nullptr;
+    }
+    for (const char* name : preferred_names) {
+        auto* property = find_struct_property_by_name(row_struct, name);
         if (auto* numeric = as_numeric_property(property)) {
             return numeric;
         }
@@ -1802,28 +1818,14 @@ private:
             return {0, 1};
         }
 
-        auto* array_property_base = find_struct_property_by_name(rows->row_struct, rule.array_field);
-        auto* array_property = array_property_base ? RC::Unreal::CastField<RC::Unreal::FArrayProperty>(array_property_base) : nullptr;
-        auto* inner_struct_property = array_property ? RC::Unreal::CastField<RC::Unreal::FStructProperty>(array_property->GetInner()) : nullptr;
-        RC::Unreal::UScriptStruct* inner_struct = inner_struct_property ? inner_struct_property->GetStruct() : nullptr;
-        if (!array_property || !inner_struct) {
+        auto* container_property = find_struct_property_by_name(rows->row_struct, rule.array_field);
+        if (!container_property) {
             append_log(
                 root_,
                 "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
                     + " ArrayField=" + rule.array_field
-                    + " Reason=stat_array_missing_or_not_struct"
-                    + " PropertyClass=" + property_class_name(array_property_base)
-            );
-            return {0, 1};
-        }
-
-        auto* numeric_property = find_first_numeric_property(inner_struct, {"Amount", "Value", "ModifierValue", "FloatValue"});
-        if (!numeric_property) {
-            append_log(
-                root_,
-                "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
-                    + " ArrayField=" + rule.array_field
-                    + " Reason=stat_array_numeric_value_missing"
+                    + " Reason=stat_container_missing"
+                    + " PropertyClass=" + property_class_name(container_property)
             );
             return {0, 1};
         }
@@ -1832,48 +1834,14 @@ private:
         std::size_t missing = 0;
         for (auto it = rows->row_map->CreateIterator(); it; ++it) {
             unsigned char* row = it.Value();
-            void* array_ptr = row ? array_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row)) : nullptr;
-            if (!array_ptr) {
+            void* container_ptr = row ? container_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row)) : nullptr;
+            if (!container_ptr) {
                 ++missing;
                 continue;
             }
-            auto* array = static_cast<RC::Unreal::FScriptArray*>(array_ptr);
-            const int32_t element_size = array_property->GetInner()->GetElementSize();
-            const int32_t count = array ? array->Num() : 0;
-            for (int32_t index = 0; index < count; ++index) {
-                auto* element = static_cast<unsigned char*>(array->GetData()) + (index * element_size);
-                if (!element) {
-                    ++missing;
-                    continue;
-                }
-                bool token_match = false;
-                for (const char* token : rule.stat_tokens) {
-                    if (exported_struct_contains(inner_struct, element, token)) {
-                        token_match = true;
-                        break;
-                    }
-                }
-                if (!token_match) {
-                    continue;
-                }
-
-                void* value_ptr = numeric_property->ContainerPtrToValuePtr<void>(static_cast<void*>(element));
-                if (!value_ptr) {
-                    ++missing;
-                    continue;
-                }
-                const double current = numeric_property->IsFloatingPoint()
-                    ? numeric_property->GetFloatingPointPropertyValue(value_ptr)
-                    : static_cast<double>(numeric_property->GetSignedIntPropertyValue(value_ptr));
-                const double baseline = numeric_baselines_.try_emplace(value_ptr, current).first->second;
-                const double adjusted = adjusted_numeric(baseline, multiplier, rule.mode, rule.result, rule.minimum);
-                if (numeric_property->IsFloatingPoint()) {
-                    numeric_property->SetFloatingPointPropertyValue(value_ptr, adjusted);
-                } else {
-                    numeric_property->SetIntPropertyValue(value_ptr, static_cast<int64_t>(std::llround(adjusted)));
-                }
-                ++applied;
-            }
+            const auto result = apply_token_numeric_property(container_property, container_ptr, rule.stat_tokens, multiplier, rule.mode, rule.result, rule.minimum, 0);
+            applied += result.first;
+            missing += result.second;
         }
 
         if (applied == 0) {
@@ -1886,6 +1854,112 @@ private:
             );
         }
         return {applied, missing + (applied == 0 ? 1 : 0)};
+    }
+
+    std::pair<std::size_t, std::size_t> apply_token_numeric_property(
+        RC::Unreal::FProperty* property,
+        void* value_ptr,
+        const std::vector<const char*>& tokens,
+        double multiplier,
+        NumericMode mode,
+        NumericResult result,
+        double minimum,
+        int depth
+    ) {
+        if (!property || !value_ptr || depth > 8) {
+            return {0, 1};
+        }
+
+        if (auto* array_property = RC::Unreal::CastField<RC::Unreal::FArrayProperty>(property)) {
+            auto* inner_struct_property = RC::Unreal::CastField<RC::Unreal::FStructProperty>(array_property->GetInner());
+            RC::Unreal::UScriptStruct* inner_struct = inner_struct_property ? inner_struct_property->GetStruct() : nullptr;
+            auto* array = static_cast<RC::Unreal::FScriptArray*>(value_ptr);
+            if (!inner_struct || !array) {
+                return {0, 1};
+            }
+
+            std::size_t applied = 0;
+            std::size_t missing = 0;
+            const int32_t element_size = array_property->GetInner()->GetElementSize();
+            const int32_t count = array->Num();
+            for (int32_t index = 0; index < count; ++index) {
+                auto* element = static_cast<unsigned char*>(array->GetData()) + (index * element_size);
+                const auto child = apply_token_numeric_struct(inner_struct, element, tokens, multiplier, mode, result, minimum, depth + 1);
+                applied += child.first;
+                missing += child.second;
+            }
+            return {applied, missing};
+        }
+
+        if (auto* struct_property = RC::Unreal::CastField<RC::Unreal::FStructProperty>(property)) {
+            return apply_token_numeric_struct(struct_property->GetStruct(), value_ptr, tokens, multiplier, mode, result, minimum, depth + 1);
+        }
+
+        return {0, 0};
+    }
+
+    std::pair<std::size_t, std::size_t> apply_token_numeric_struct(
+        RC::Unreal::UStruct* row_struct,
+        void* container,
+        const std::vector<const char*>& tokens,
+        double multiplier,
+        NumericMode mode,
+        NumericResult result,
+        double minimum,
+        int depth
+    ) {
+        if (!row_struct || !container || depth > 8) {
+            return {0, 1};
+        }
+
+        std::size_t applied = 0;
+        std::size_t missing = 0;
+        for (auto* property : row_struct->ForEachPropertyInChain()) {
+            if (!property) {
+                continue;
+            }
+            auto* array_property = RC::Unreal::CastField<RC::Unreal::FArrayProperty>(property);
+            auto* struct_property = RC::Unreal::CastField<RC::Unreal::FStructProperty>(property);
+            if (!array_property && !struct_property) {
+                continue;
+            }
+            void* child_ptr = property->ContainerPtrToValuePtr<void>(container);
+            const auto child = apply_token_numeric_property(property, child_ptr, tokens, multiplier, mode, result, minimum, depth + 1);
+            applied += child.first;
+            missing += child.second;
+        }
+
+        bool token_match = false;
+        for (const char* token : tokens) {
+            if (exported_struct_contains(row_struct, container, token)) {
+                token_match = true;
+                break;
+            }
+        }
+        if (!token_match) {
+            return {applied, missing};
+        }
+
+        auto* numeric_property = find_named_numeric_property(row_struct, {"Amount", "Value", "ModifierValue", "FloatValue", "Multiplier", "BaseValue"});
+        if (!numeric_property) {
+            return {applied, missing + 1};
+        }
+
+        void* numeric_ptr = numeric_property->ContainerPtrToValuePtr<void>(container);
+        if (!numeric_ptr) {
+            return {applied, missing + 1};
+        }
+        const double current = numeric_property->IsFloatingPoint()
+            ? numeric_property->GetFloatingPointPropertyValue(numeric_ptr)
+            : static_cast<double>(numeric_property->GetSignedIntPropertyValue(numeric_ptr));
+        const double baseline = numeric_baselines_.try_emplace(numeric_ptr, current).first->second;
+        const double adjusted = adjusted_numeric(baseline, multiplier, mode, result, minimum);
+        if (numeric_property->IsFloatingPoint()) {
+            numeric_property->SetFloatingPointPropertyValue(numeric_ptr, adjusted);
+        } else {
+            numeric_property->SetIntPropertyValue(numeric_ptr, static_cast<int64_t>(std::llround(adjusted)));
+        }
+        return {applied + 1, missing};
     }
 
     std::pair<std::size_t, std::size_t> apply_bool_table_rule(RC::Unreal::UObject* table, const BoolTableRule& rule) {
@@ -1983,59 +2057,53 @@ private:
             return {0, 1};
         }
 
+        const std::vector<const char*> tokens = {
+            "BaseChanceToMineVoxelInstantly_+%",
+            "BaseChanceToMineVoxelInstantly_+",
+            "BaseChanceToMineVoxelInstantly",
+            "MineVoxelInstantly",
+            "VoxelInstant"
+        };
         std::size_t applied = 0;
         std::size_t missing = 0;
+        std::size_t candidate_rows = 0;
         for (auto it = rows->row_map->CreateIterator(); it; ++it) {
             const auto row_name = narrow_unreal(it.Key().ToString());
-            if (row_name != "Resources_Voxel_Instant") {
+            if (row_name != "Resources_Voxel_Instant" && !contains_text(row_name, "Voxel_Instant")) {
                 continue;
             }
+            ++candidate_rows;
             unsigned char* row = it.Value();
             if (!row) {
                 ++missing;
                 continue;
             }
             for (auto* property : rows->row_struct->ForEachPropertyInChain()) {
-                auto* array_property = property ? RC::Unreal::CastField<RC::Unreal::FArrayProperty>(property) : nullptr;
-                auto* inner_struct_property = array_property ? RC::Unreal::CastField<RC::Unreal::FStructProperty>(array_property->GetInner()) : nullptr;
-                RC::Unreal::UScriptStruct* inner_struct = inner_struct_property ? inner_struct_property->GetStruct() : nullptr;
-                if (!array_property || !inner_struct) {
+                if (!property) {
                     continue;
                 }
-                auto* numeric_property = find_first_numeric_property(inner_struct, {"Amount", "Value", "ModifierValue", "FloatValue"});
-                if (!numeric_property) {
-                    continue;
-                }
-                void* array_ptr = array_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row));
-                auto* array = array_ptr ? static_cast<RC::Unreal::FScriptArray*>(array_ptr) : nullptr;
-                const int32_t element_size = array_property->GetInner()->GetElementSize();
-                const int32_t count = array ? array->Num() : 0;
-                for (int32_t index = 0; index < count; ++index) {
-                    auto* element = static_cast<unsigned char*>(array->GetData()) + (index * element_size);
-                    if (!element || !exported_struct_contains(inner_struct, element, "BaseChanceToMineVoxelInstantly_+%")) {
-                        continue;
-                    }
-                    void* value_ptr = numeric_property->ContainerPtrToValuePtr<void>(static_cast<void*>(element));
-                    if (!value_ptr) {
-                        ++missing;
-                        continue;
-                    }
-                    const double current = numeric_property->IsFloatingPoint()
-                        ? numeric_property->GetFloatingPointPropertyValue(value_ptr)
-                        : static_cast<double>(numeric_property->GetSignedIntPropertyValue(value_ptr));
-                    const double baseline = numeric_baselines_.try_emplace(value_ptr, current).first->second;
-                    const double adjusted = adjusted_numeric(baseline, multiplier, NumericMode::Multiply, NumericResult::Float, 0.0);
-                    if (numeric_property->IsFloatingPoint()) {
-                        numeric_property->SetFloatingPointPropertyValue(value_ptr, adjusted);
-                    } else {
-                        numeric_property->SetIntPropertyValue(value_ptr, static_cast<int64_t>(std::llround(adjusted)));
-                    }
-                    ++applied;
-                }
+                void* value_ptr = property->ContainerPtrToValuePtr<void>(static_cast<void*>(row));
+                const auto result = apply_token_numeric_property(
+                    property,
+                    value_ptr,
+                    tokens,
+                    multiplier,
+                    NumericMode::Multiply,
+                    NumericResult::Float,
+                    0.0,
+                    0
+                );
+                applied += result.first;
+                missing += result.second;
             }
         }
         if (applied == 0) {
-            append_log(root_, "FIELD_MISS Table=" + narrow_unreal(table->GetFullName()) + " Key=lucky_strike_chance Reason=talent_stat_row_or_token_not_found");
+            append_log(
+                root_,
+                "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
+                    + " Key=lucky_strike_chance Reason=talent_stat_row_or_token_not_found"
+                    + " CandidateRows=" + std::to_string(candidate_rows)
+            );
         }
         return {applied, missing + (applied == 0 ? 1 : 0)};
     }
