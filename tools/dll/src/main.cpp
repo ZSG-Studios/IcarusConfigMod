@@ -7,6 +7,7 @@
 #include <Unreal/Hooks.hpp>
 #include <Unreal/Core/Containers/Map.hpp>
 #include <Unreal/NameTypes.hpp>
+#include <Unreal/UClass.hpp>
 #include <Unreal/Property/FArrayProperty.hpp>
 #include <Unreal/Property/FBoolProperty.hpp>
 #include <Unreal/Property/FMapProperty.hpp>
@@ -811,7 +812,7 @@ private:
         std::ostringstream json;
         json << "{\n";
         json << "  \"schema\": 1,\n";
-        json << "  \"bridgeVersion\": \"0.2\",\n";
+        json << "  \"bridgeVersion\": \"0.3\",\n";
         json << "  \"state\": \"" << json_escape(state) << "\",\n";
         json << "  \"modName\": \"Configuration_Mod\",\n";
         json << "  \"pid\": " << GetCurrentProcessId() << ",\n";
@@ -829,7 +830,7 @@ private:
         json << "    \"moveItem\": false,\n";
         json << "    \"slotSafeMove\": false\n";
         json << "  },\n";
-        json << "  \"message\": \"Live bridge heartbeat is connected. Runtime inventory snapshot is read-only; item move/write remains guarded until exact Unreal slot mutation is verified.\"\n";
+        json << "  \"message\": \"Live bridge heartbeat is connected. Runtime inventory object/property snapshot is read-only; item move/write remains guarded until exact Unreal slot mutation is verified.\"\n";
         json << "}\n";
 
         if (!write_text_atomic(status_path, json.str())) {
@@ -843,6 +844,10 @@ private:
         const auto snapshot_path = bridge_root / "snapshot.json";
         const std::vector<std::string_view> object_tokens{
             "inventory", "container", "storage", "item", "slot", "bag", "backpack", "mount"
+        };
+        const std::vector<std::string_view> property_tokens{
+            "inventory", "container", "storage", "item", "items", "slot", "slots", "row", "static", "stack", "quantity", "amount",
+            "contents", "collection", "weight", "durability", "index", "uuid", "guid"
         };
         const std::vector<std::string_view> class_probes{
             "IcarusInventoryComponent",
@@ -867,7 +872,8 @@ private:
                 std::string full_name;
             };
 
-            constexpr std::size_t max_candidates = 80;
+            constexpr std::size_t max_candidates = 140;
+            constexpr std::size_t max_properties_per_object = 24;
             std::vector<Candidate> candidates;
             std::unordered_set<std::uintptr_t> seen;
 
@@ -911,7 +917,7 @@ private:
             std::ostringstream json;
             json << "{\n";
             json << "  \"schema\": 1,\n";
-            json << "  \"bridgeVersion\": \"0.2\",\n";
+            json << "  \"bridgeVersion\": \"0.3\",\n";
             json << "  \"timestampUnix\": " << unix_time_seconds() << ",\n";
             json << "  \"readOnly\": true,\n";
             json << "  \"candidateCount\": " << candidates.size() << ",\n";
@@ -932,10 +938,50 @@ private:
                 json << "      \"classProbe\": \"" << json_escape(candidate.class_probe) << "\",\n";
                 json << "      \"object\": \"" << json_escape(candidate.full_name) << "\",\n";
                 json << "      \"properties\": [";
-
-                json << "{\"name\":\"<object>\",\"class\":\"" << json_escape(candidate.class_probe)
-                     << "\",\"value\":\"" << json_escape(candidate.full_name) << "\"}";
-                ++summary.property_hits;
+                bool wrote_property = false;
+                std::size_t property_count = 0;
+                try {
+                    auto* object_class = candidate.object->GetClassPrivate();
+                    if (object_class) {
+                        for (auto* property : object_class->ForEachPropertyInChain()) {
+                            if (!property || property_count >= max_properties_per_object) {
+                                continue;
+                            }
+                            const auto property_name = narrow_unreal(property->GetName());
+                            const auto property_class = property_class_name(property);
+                            auto exported = export_property_text(property, candidate.object);
+                            if (exported.size() > 700) {
+                                exported = exported.substr(0, 700) + "...";
+                            }
+                            if (!contains_any_i(property_name, property_tokens)
+                                && !contains_any_i(property_class, property_tokens)
+                                && !contains_any_i(exported, property_tokens)) {
+                                continue;
+                            }
+                            if (wrote_property) {
+                                json << ", ";
+                            }
+                            json << "{\"name\":\"" << json_escape(property_name)
+                                 << "\",\"class\":\"" << json_escape(property_class)
+                                 << "\",\"value\":\"" << json_escape(exported) << "\"}";
+                            wrote_property = true;
+                            ++property_count;
+                            ++summary.property_hits;
+                        }
+                    }
+                } catch (...) {
+                    if (wrote_property) {
+                        json << ", ";
+                    }
+                    json << "{\"name\":\"<property_error>\",\"class\":\"<error>\",\"value\":\"property scan failed\"}";
+                    wrote_property = true;
+                    ++summary.property_hits;
+                }
+                if (!wrote_property) {
+                    json << "{\"name\":\"<object>\",\"class\":\"" << json_escape(candidate.class_probe)
+                         << "\",\"value\":\"" << json_escape(candidate.full_name) << "\"}";
+                    ++summary.property_hits;
+                }
                 json << "]\n";
                 json << "    }";
                 if (index + 1 < candidates.size()) {
