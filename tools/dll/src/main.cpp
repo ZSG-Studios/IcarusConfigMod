@@ -217,7 +217,7 @@ const NumericTableRule kNumericTableRules[] = {
     {"wood_yield", "table_multipliers", "D_ToolDamage", {"Felling_Efficiency"}, NumericMode::Multiply, NumericResult::Float, 0.01},
     {"skinning_yield", "table_multipliers", "D_ToolDamage", {"Skinning_Efficiency"}, NumericMode::Multiply, NumericResult::Float, 0.01},
     {"reaping_yield", "table_multipliers", "D_ToolDamage", {"Reaping_Efficiency"}, NumericMode::Multiply, NumericResult::Float, 0.01},
-    {"processing_speed", "table_multipliers", "D_ProcessorRecipes", {"RequiredMillijoules"}, NumericMode::Divide, NumericResult::Floor, 1.0, {}, {"_Dead"}},
+    {"processing_speed", "table_multipliers", "D_ProcessorRecipes", {"RequiredMillijoules"}, NumericMode::Divide, NumericResult::Floor, 1.0},
     {"processing_speed", "table_multipliers", "D_ExtractorRecipes", {"RequiredMillijoules"}, NumericMode::Divide, NumericResult::Floor, 1.0},
     {"crafting_xp", "table_multipliers", "D_ItemsStatic", {"CraftingExperience"}, NumericMode::Multiply, NumericResult::Nearest, 0.0},
     {"fuel_duration", "table_multipliers", "D_Combustible", {"MillijoulesProvided"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
@@ -242,11 +242,11 @@ const RangeGroupRule kRangeGroupRules[] = {
 };
 
 const ArrayNumericRule kArrayNumericRules[] = {
-    {"material_efficiency", "table_multipliers", "D_ProcessorRecipes", "Inputs", "Count", NumericMode::Divide, NumericResult::Floor, 1.0, {"Carcass_"}},
+    {"material_efficiency", "table_multipliers", "D_ProcessorRecipes", "Inputs", "Count", NumericMode::Divide, NumericResult::Floor, 1.0},
 };
 
 const ArrayRangeGroupRule kArrayRangeGroupRules[] = {
-    {"recipeOutputGroup", "D_ProcessorRecipes", "Outputs", "Count", {{2, 5}, {6, 10}, {11, 25}, {26, 50}, {51, 1000}}, 1.0, {"_Kitchen_", "Carcass_"}},
+    {"recipeOutputGroup", "D_ProcessorRecipes", "Outputs", "Count", {{2, 5}, {6, 10}, {11, 25}, {26, 50}, {51, 1000}}, 1.0, {"_Kitchen_"}},
     {"missionCurrencyGroup", "D_FactionMissions", "CurrencyRewarded", "Amount", {{1, 25}, {26, 50}, {51, 100}, {101, 250}, {251, 500}, {501, 1000}, {1001, 1000000}}, 0.0},
 };
 
@@ -540,18 +540,6 @@ bool excluded_row(
         }
     }
     return false;
-}
-
-bool row_starts_with(std::string_view row, std::string_view prefix) {
-    return row.size() >= prefix.size() && row.substr(0, prefix.size()) == prefix;
-}
-
-bool is_carcass_processor_row(std::string_view row) {
-    return row_starts_with(row, "Carcass_");
-}
-
-bool skip_processor_recipe_row(const char* table_stem, std::string_view row) {
-    return table_stem && std::string_view(table_stem) == "D_ProcessorRecipes" && is_carcass_processor_row(row);
 }
 
 double adjusted_numeric(double baseline, double multiplier, NumericMode mode, NumericResult result, double minimum) {
@@ -1987,7 +1975,7 @@ private:
         std::size_t missing = 0;
         for (auto it = row_map->CreateIterator(); it; ++it) {
             const auto row_name = narrow_unreal(it.Key().ToString());
-            if (!listed_row(row_name, rule.row_names) || excluded_row(row_name, {}, rule.exclude_suffixes) || skip_processor_recipe_row(rule.table_stem, row_name)) {
+            if (!listed_row(row_name, rule.row_names) || excluded_row(row_name, {}, rule.exclude_suffixes)) {
                 continue;
             }
             unsigned char* row = it.Value();
@@ -2043,7 +2031,7 @@ private:
             std::size_t missing = 0;
             for (auto it = row_map->CreateIterator(); it; ++it) {
                 const auto row_name = narrow_unreal(it.Key().ToString());
-                if (!listed_row(row_name, rule.row_names) || excluded_row(row_name, {}, rule.exclude_suffixes) || skip_processor_recipe_row(rule.table_stem, row_name)) {
+                if (!listed_row(row_name, rule.row_names) || excluded_row(row_name, {}, rule.exclude_suffixes)) {
                     continue;
                 }
                 unsigned char* row = it.Value();
@@ -2830,9 +2818,6 @@ private:
         std::size_t missing = 0;
         for (auto it = row_map->CreateIterator(); it; ++it) {
             const auto row_name = narrow_unreal(it.Key().ToString());
-            if (is_carcass_processor_row(row_name)) {
-                continue;
-            }
             unsigned char* row = it.Value();
             void* array_ptr = row ? array_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row)) : nullptr;
             if (!array_ptr) {
