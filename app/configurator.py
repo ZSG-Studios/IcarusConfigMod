@@ -23,7 +23,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "Icarus Balance Configurator"
-APP_VERSION = "0.1.5-beta"
+APP_VERSION = "0.1.6-beta"
 UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 RUNTIME_MOD_FOLDER = "Configuration_Mod"
 RUNTIME_INI_NAME = "settings.ini"
@@ -1623,6 +1623,7 @@ class Configurator(tk.Tk):
     def clean_inventory_name(self, value: str, fallback: str = "Inventory") -> str:
         if not value or value == "Unknown saved inventory":
             return fallback
+        value = re.sub(r"^(Kit|Item|Deployable)_", "", value)
         match = re.search(r"(?:GEN_|GENERATED_)(\d+)", value)
         if match:
             return f"World Container {int(match.group(1))}"
@@ -1913,8 +1914,18 @@ class Configurator(tk.Tk):
             return None, key_pos
         return self.unreal_property_string_after(data, prop_pos + len(prop)), key_pos
 
+    def unreal_name_property_after_key_limited(self, data: bytes, key: bytes, start: int, end: int) -> tuple[str | None, int]:
+        key_pos = data.find(key, start, end)
+        if key_pos < 0:
+            return None, -1
+        prop = b"NameProperty\x00"
+        prop_pos = data.find(prop, key_pos, min(end, key_pos + 256))
+        if prop_pos < 0:
+            return None, key_pos
+        return self.unreal_property_string_after(data, prop_pos + len(prop)), key_pos
+
     def nearest_blob_actor_name(self, data: bytes, item_pos: int) -> str:
-        search_start = max(0, item_pos - 12000)
+        search_start = max(0, item_pos - 200000)
         chunk = data[search_start:item_pos]
         marker = b"ObjectFName\x00"
         rel = chunk.rfind(marker)
@@ -1922,6 +1933,82 @@ class Configurator(tk.Tk):
             return "Unknown saved inventory"
         name, _pos = self.unreal_name_property_after_key(data, marker, search_start + rel)
         return name or "Unknown saved inventory"
+
+    def nearest_blob_inventory_info(self, data: bytes, item_pos: int) -> str | None:
+        search_start = max(0, item_pos - 5000)
+        marker = b"InventoryInfo\x00"
+        rel = data[search_start:item_pos].rfind(marker)
+        if rel < 0:
+            return None
+        name, _pos = self.unreal_name_property_after_key(data, marker, search_start + rel)
+        return name
+
+    def nearest_blob_saved_inventory_start(self, data: bytes, item_pos: int) -> int:
+        search_start = max(0, item_pos - 250000)
+        chunk = data[search_start:item_pos]
+        candidates = [
+            chunk.rfind(b"SavedInventories\x00"),
+            chunk.rfind(b"SavedInventoryContainers\x00"),
+            chunk.rfind(b"InventorySaveData\x00"),
+        ]
+        rel = max(candidates)
+        return search_start + rel if rel >= 0 else item_pos
+
+    def nearest_blob_actor_start(self, data: bytes, item_pos: int) -> int:
+        inventory_start = self.nearest_blob_saved_inventory_start(data, item_pos)
+        search_start = max(0, inventory_start - 250000)
+        rel = data[search_start:inventory_start].rfind(b"ObjectFName\x00")
+        return search_start + rel if rel >= 0 else search_start
+
+    def blob_deployable_row_name(self, data: bytes, item_pos: int) -> str | None:
+        inventory_start = self.nearest_blob_saved_inventory_start(data, item_pos)
+        actor_start = self.nearest_blob_actor_start(data, item_pos)
+        if inventory_start <= actor_start:
+            return None
+        name, _pos = self.unreal_name_property_after_key_limited(
+            data,
+            b"StaticItemDataRowName\x00",
+            actor_start,
+            inventory_start,
+        )
+        return name
+
+    def generated_actor_suffix(self, actor_name: str) -> str:
+        match = re.search(r"(?:GEN_|GENERATED_)(\d+)", actor_name)
+        if match:
+            return str(int(match.group(1)))
+        match = re.search(r"_(\d+)$", actor_name)
+        return str(int(match.group(1))) if match else ""
+
+    def blob_actor_component_inventory_name(self, data: bytes, item_pos: int, actor_name: str) -> str | None:
+        inventory_start = self.nearest_blob_saved_inventory_start(data, item_pos)
+        actor_start = self.nearest_blob_actor_start(data, item_pos)
+        if inventory_start <= actor_start:
+            return None
+        chunk = data[actor_start:inventory_start]
+        suffix = self.generated_actor_suffix(actor_name)
+        suffix_text = f" {suffix}" if suffix else ""
+        if b"IcarusMountCharacterRecorderComponent" in chunk:
+            return f"Mount Inventory{suffix_text}"
+        if b"PlayerStateRecorderComponent" in chunk or b"PlayerRecorderComponent" in chunk:
+            return f"Player Inventory{suffix_text}"
+        if b"IcarusContainerManagerRecorderComponent" in chunk or b"IcarusGameMode" in chunk:
+            return "Prospect Inventory"
+        if b"VoxelRecorderComponent" in chunk:
+            return f"Voxel Inventory{suffix_text}"
+        return None
+
+    def blob_inventory_display_name(self, data: bytes, item_pos: int, actor_name: str) -> str:
+        inventory_info = self.nearest_blob_inventory_info(data, item_pos)
+        if inventory_info:
+            return self.clean_inventory_name(inventory_info, "Saved Inventory")
+        deployable_name = self.blob_deployable_row_name(data, item_pos)
+        if deployable_name:
+            return self.clean_inventory_name(deployable_name, "Saved Inventory")
+        component_name = self.blob_actor_component_inventory_name(data, item_pos, actor_name)
+        if component_name:
+            return component_name
+        return self.clean_inventory_name(actor_name, "Saved Inventory")
 
     def extract_prospect_blob_items(self, prospect_path: Path) -> list[dict[str, Any]]:
         data = self.read_json_file(prospect_path, {})
@@ -1941,11 +2028,13 @@ class Configurator(tk.Tk):
             row_name, _row_pos = self.unreal_name_property_after_key(decompressed, marker, item_pos)
             if row_name and row_name != "None":
                 actor_name = self.nearest_blob_actor_name(decompressed, item_pos)
+                inventory_name = self.blob_inventory_display_name(decompressed, item_pos, actor_name)
                 amount = self.unreal_int_property_after_key(decompressed, b"Value\x00", item_pos, item_end - item_pos)
                 items.append(
                     {
                         "row_name": row_name,
                         "actor_name": actor_name,
+                        "inventory_name": inventory_name,
                         "amount": amount if amount is not None and amount > 0 else 1,
                         "offset": item_pos,
                     }
@@ -1984,7 +2073,7 @@ class Configurator(tk.Tk):
             for index, item in enumerate(blob_items):
                 inventory_label = (
                     f"Prospect {prospect_id} - "
-                    f"{self.clean_inventory_name(item['actor_name'], 'Saved Inventory')}"
+                    f"{item.get('inventory_name') or self.clean_inventory_name(item['actor_name'], 'Saved Inventory')}"
                 )
                 display_name = self.clean_item_name(item["row_name"])
                 amount = item.get("amount", 1)

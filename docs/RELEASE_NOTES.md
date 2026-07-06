@@ -1,5 +1,17 @@
 # Release Notes
 
+## v0.1.6-beta - Transfer Vault Inventory Names
+
+This update improves the Transfer Vault inventory dropdown labels so items are grouped under the inventory they are actually saved in.
+
+### Fixed
+
+- Deployable inventories now prefer `StaticItemDataRowName` names such as `Wood Cupboard`, `Fabricator`, `Concrete Furnace V2`, `Oxite Dissolver`, and similar rows.
+- Player recorder inventories are labeled as player inventories instead of generated world container IDs.
+- Mount recorder inventories are labeled as mount inventories instead of generated world container IDs.
+- Prospect container-manager fallbacks are labeled as `Prospect Inventory` instead of `IcarusGameMode`.
+- Generated actor IDs are now used only as a fallback when no better owner name is available.
+
 ## v0.1.5-beta - Transfer Vault Inventory Browser
 
 This update makes the Transfer Vault source browser usable as an inventory viewer instead of one long mixed list.

@@ -17,7 +17,7 @@ This mod is built for configurable balance testing. It can adjust progression, r
 [*]Lets players create, save, import, and reuse custom profiles.[/*]
 [*]Creates an automatic player/world save backup before applying configuration changes.[/*]
 [*]Includes a Save Backups tab for manual backup, restore, refresh, and opening the backup folder.[/*]
-[*]Includes a Transfer Vault tab for scanning local players/worlds, browsing detected inventories from a dropdown, listing live prospect inventory item names and amounts read-only, and moving verified JSON-backed items through a shared offline stash with slot safety checks.[/*]
+[*]Includes a Transfer Vault tab for scanning local players/worlds, browsing detected inventories from a dropdown with cleaner deployable/player/mount/attachment names, listing live prospect inventory item names and amounts read-only, and moving verified JSON-backed items through a shared offline stash with slot safety checks.[/*]
 [*]Writes selected settings into a unified runtime config.[/*]
 [*]Applies supported settings in-game through the DLL backend.[/*]
 [*]Writes validation logs so players can confirm active settings applied.[/*]
@@ -76,7 +76,7 @@ If [b]GreenLight=NO[/b], check nearby [b]SETTING_STATUS[/b] lines to see which a
 
 [heading]Current Beta Notes[/heading]
 [list]
-[*]This [b]v0.1.5-beta[/b] build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, zero-value timer math, the Transfer Vault beta with inventory dropdown browsing, read-only live prospect inventory item amounts, and restore slot safety checks.[/*]
+[*]This [b]v0.1.6-beta[/b] build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, zero-value timer math, the Transfer Vault beta with cleaner inventory names, inventory dropdown browsing, read-only live prospect inventory item amounts, and restore slot safety checks.[/*]
 [*]Skinning yield now increases carcass output counts instead of changing [b]D_ToolDamage.Skinning_Efficiency[/b], which could make carcasses deplete too quickly.[/*]
 [*]Baseline 0 values now stay 0 during multiplier math, preventing disabled or sentinel timers from becoming one-second timers.[/*]
 [*]Free craft no longer clears [b]ResourceInputs[/b], avoiding live resource drain behavior.[/*]
@@ -118,7 +118,7 @@ The [b]Transfer Vault[/b] tab scans local Icarus player folders and prospect fil
 [*]Writes a transaction ledger to [b]transfer_vault\ledger.jsonl[/b].[/*]
 [*]Refuses item moves while Icarus is open.[/*]
 [*]Checks known target slot capacity before restore and refuses to write if no open slot is available.[/*]
-[*]Detects active prospect members and decodes compressed live-world inventory item row names and amounts read-only.[/*]
+[*]Detects active prospect members and decodes compressed live-world inventory item row names, amounts, and cleaner owning inventory names read-only.[/*]
 [/list]
 
 [b]Beta limit:[/b] live backpack, hotbar, belt, equipment, mount cargo, and world container items inside [b]ProspectBlob.BinaryBlob[/b] are listed read-only until the Unreal property writer is fully validated.
