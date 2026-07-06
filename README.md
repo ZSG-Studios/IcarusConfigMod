@@ -22,7 +22,7 @@ If Icarus is not found automatically, the configurator prompts the player to sel
 
 Runtime backups, player/world save backups, logs, live bridge status, and generated runtime work files are stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\` instead of beside the portable exe or inside the extracted program folder.
 
-The configurator also includes a `Live Vault` tab. This is now focused on the UE4SS in-game bridge, not offline save-file item moving. When the UE4SS DLL is running in-game, it writes a live heartbeat to `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\status.json` so the configurator can confirm the installed runtime is actually alive. Live inventory read/write remains guarded until slot-safe Unreal object operations are verified inside the game runtime.
+The configurator also includes a `Live Vault` tab. This is now focused on the UE4SS in-game bridge, not offline save-file item moving. When the UE4SS DLL is running in-game, it writes a live heartbeat to `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\status.json` so the configurator can confirm the installed runtime is actually alive. The current bridge also writes a capped read-only runtime object snapshot to `snapshot.json` for inventory-object discovery. Live inventory writes and moves remain guarded until slot-safe Unreal object operations are verified inside the game runtime.
 
 ## Player Package Layout
 
@@ -87,7 +87,8 @@ Recent runtime fixes in `v0.1.8-beta`:
 - Added a UE4SS live bridge heartbeat written by the runtime DLL to `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\status.json`.
 - Replaced the exposed offline Transfer Vault workflow with a `Live Vault` tab focused on the UE4SS runtime bridge.
 - Added `Connect Live` and `Open Live Bridge` controls to the Live Vault tab.
-- The live bridge reports runtime PID, heartbeat age, and guarded inventory read/write capabilities.
+- The live bridge reports runtime PID, heartbeat age, bridge version, inventory candidate count, snapshot path, and guarded inventory write capability.
+- The DLL writes a capped read-only inventory-object discovery snapshot to `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\snapshot.json`.
 - Offline save-vault item export/import is no longer exposed as the main vault workflow.
 - Generated `settings.ini` now includes `[live_bridge] enabled = true`.
 - Added per-container slot overrides for common storage/workstation inventories so players can target specific container types instead of only broad vanilla slot-count ranges.
@@ -131,7 +132,7 @@ Backup and restore refuse to run while Icarus is open so the app does not copy o
 
 `Connect Live` checks whether the installed UE4SS runtime DLL is currently alive in a running game instance. The DLL writes a heartbeat and capability JSON file under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\`.
 
-This is the foundation for live inventory transfer. In this beta, the bridge intentionally reports inventory read/write as guarded until the DLL has verified Unreal inventory object discovery, item identity checks, open-slot checks, and no-overwrite move operations inside the running session. Offline save-vault item moving is not exposed as the main workflow.
+This is the foundation for live inventory transfer. In this beta, the bridge writes a capped read-only object discovery snapshot to `snapshot.json` and reports candidate counts in the UI. Live item writes remain guarded until the DLL has verified exact Unreal inventory slot properties, item identity checks, open-slot checks, and no-overwrite move operations inside the running session. Offline save-vault item moving is not exposed as the main workflow.
 
 ## Source Layout
 

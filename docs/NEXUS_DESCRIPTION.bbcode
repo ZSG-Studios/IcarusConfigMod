@@ -77,10 +77,10 @@ If [b]GreenLight=NO[/b], check nearby [b]SETTING_STATUS[/b] lines to see which a
 
 [heading]Current Beta Notes[/heading]
 [list]
-[*]This [b]v0.1.8-beta[/b] build adds a UE4SS live bridge heartbeat and [b]Live Vault[/b] status check.[/*]
-[*]The runtime DLL writes live status to [b]%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\status.json[/b] while the mod is loaded in-game.[/*]
+[*]This [b]v0.1.8-beta[/b] build adds a UE4SS live bridge heartbeat, read-only inventory-object discovery snapshot, and [b]Live Vault[/b] status check.[/*]
+[*]The runtime DLL writes live status to [b]%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\status.json[/b] and a capped read-only snapshot to [b]snapshot.json[/b] while the mod is loaded in-game.[/*]
 [*]Offline save-vault item export/import is not exposed as the player workflow.[/*]
-[*]Live inventory read/write is guarded until Unreal object discovery, item identity checks, open-slot checks, and no-overwrite moves are verified in the running session.[/*]
+[*]Live inventory writes/moves are guarded until exact Unreal inventory slot properties, item identity checks, open-slot checks, and no-overwrite moves are verified in the running session.[/*]
 [*]Old scanner internals hide loadout inventories, display read-only blob rows as per-slot entries, and try saved mount/creature names first.[/*]
 [*]This build also includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, zero-value timer math, cleaner player inventory names, persistent checked item rows, inventory dropdown browsing, and restore slot safety checks.[/*]
 [*]Skinning yield now increases carcass output counts instead of changing [b]D_ToolDamage.Skinning_Efficiency[/b], which could make carcasses deplete too quickly.[/*]
@@ -116,12 +116,12 @@ When present, backups include:
 Every apply creates a [b]before_apply[/b] backup first. Restoring a backup creates a [b]pre_restore[/b] backup before replacing matching save components. Close Icarus before creating or restoring backups so the app does not copy or replace live save files.
 
 [heading]Live Vault[/heading]
-The [b]Live Vault[/b] tab connects to the running UE4SS DLL bridge. It reports whether the in-game runtime is alive, the process ID, heartbeat freshness, and whether live inventory snapshot or slot-safe move capability is enabled.
+The [b]Live Vault[/b] tab connects to the running UE4SS DLL bridge. It reports whether the in-game runtime is alive, the process ID, heartbeat freshness, bridge version, inventory candidate count, snapshot path, and whether live inventory snapshot or slot-safe move capability is enabled.
 
 [list]
 [*]Checks the live UE4SS DLL heartbeat through [b]Connect Live[/b].[/*]
-[*]Shows runtime bridge state, PID, capability flags, and heartbeat path.[/*]
-[*]Keeps live inventory writes guarded until the DLL verifies Unreal inventory object access, slot checks, and no-overwrite moves.[/*]
+[*]Shows runtime bridge state, PID, capability flags, heartbeat path, and snapshot path.[/*]
+[*]Keeps live inventory writes guarded until the DLL verifies exact Unreal inventory slot access, slot checks, and no-overwrite moves.[/*]
 [*]Does not expose offline save-vault item moving as the player workflow.[/*]
 [/list]
 

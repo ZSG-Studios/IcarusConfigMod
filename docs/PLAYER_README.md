@@ -37,7 +37,7 @@ Runtime backups, player/world save backups, logs, live bridge status, saved Icar
 
 Use the `Live Vault` tab to check the in-game UE4SS runtime bridge. This is now the main vault direction; offline save-file item moving is not exposed as the player workflow.
 
-Use `Connect Live` to check whether the in-game UE4SS DLL is currently running. The DLL writes a heartbeat under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\`. Live inventory read/write remains guarded until slot-safe Unreal object moves are verified inside the running session.
+Use `Connect Live` to check whether the in-game UE4SS DLL is currently running. The DLL writes a heartbeat under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\`. It also writes a capped read-only runtime object discovery snapshot to `snapshot.json` so testers can see whether inventory-like objects are being found. Live inventory writes/moves remain guarded until slot-safe Unreal object moves are verified inside the running session.
 
 The old offline scanner internals no longer scan loadout inventories, treat decoded blob rows as per-slot entries instead of aggregated stack totals, and try saved mount/creature names when available.
 
@@ -60,7 +60,7 @@ Partial=0 Pending=0 Skipped=0 Unsupported=0 MissingFields=0
 
 ## Beta Notes
 
-This `v0.1.8-beta` build adds a UE4SS live bridge heartbeat, Live Vault `Connect Live` status check, per-container slot overrides, loadout hiding in the old scanner internals, safer per-slot blob display, and improved mount inventory names.
+This `v0.1.8-beta` build adds a UE4SS live bridge heartbeat, read-only live inventory-object discovery snapshot, Live Vault `Connect Live` status check, per-container slot overrides, loadout hiding in the old scanner internals, safer per-slot blob display, and improved mount inventory names.
 
 Skinning yield is applied through carcass output counts instead of tool-damage skinning efficiency, which prevents the yield setting from making carcasses deplete too quickly.
 

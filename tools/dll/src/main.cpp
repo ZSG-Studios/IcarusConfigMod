@@ -44,6 +44,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -109,6 +110,12 @@ std::string narrow(const std::filesystem::path& path) {
 struct RuntimeSettings {
     double air_control{1.0};
     double camera_tilt{1.0};
+};
+
+struct LiveInventorySnapshotSummary {
+    std::size_t candidates{0};
+    std::size_t property_hits{0};
+    bool snapshot_written{false};
 };
 
 struct DebugValidationConfig {
@@ -381,6 +388,28 @@ std::string narrow_unreal(const RC::Unreal::FString& text) {
 
 bool contains_text(std::string_view haystack, std::string_view needle) {
     return haystack.find(needle) != std::string_view::npos;
+}
+
+std::string lower_ascii(std::string_view text) {
+    std::string lowered;
+    lowered.reserve(text.size());
+    for (const char ch : text) {
+        lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    return lowered;
+}
+
+bool contains_text_i(std::string_view haystack, std::string_view needle) {
+    return lower_ascii(haystack).find(lower_ascii(needle)) != std::string::npos;
+}
+
+bool contains_any_i(std::string_view haystack, const std::vector<std::string_view>& needles) {
+    for (const auto needle : needles) {
+        if (contains_text_i(haystack, needle)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool table_stem_matches(std::string_view table_name, std::string_view table_stem) {
@@ -774,28 +803,33 @@ private:
         }
     }
 
-    void write_live_bridge_status(std::string_view state) const {
+    void write_live_bridge_status(std::string_view state, const LiveInventorySnapshotSummary& snapshot) const {
         const auto bridge_root = live_bridge_dir();
         const auto status_path = bridge_root / "status.json";
+        const auto snapshot_path = bridge_root / "snapshot.json";
+        const bool snapshot_available = snapshot.snapshot_written && snapshot.candidates > 0;
         std::ostringstream json;
         json << "{\n";
         json << "  \"schema\": 1,\n";
-        json << "  \"bridgeVersion\": \"0.1\",\n";
+        json << "  \"bridgeVersion\": \"0.2\",\n";
         json << "  \"state\": \"" << json_escape(state) << "\",\n";
         json << "  \"modName\": \"Configuration_Mod\",\n";
         json << "  \"pid\": " << GetCurrentProcessId() << ",\n";
         json << "  \"timestampUnix\": " << unix_time_seconds() << ",\n";
         json << "  \"modDir\": \"" << json_escape(narrow(root_)) << "\",\n";
         json << "  \"statusPath\": \"" << json_escape(narrow(status_path)) << "\",\n";
-        json << "  \"inventoryRead\": false,\n";
+        json << "  \"snapshotPath\": \"" << json_escape(narrow(snapshot_path)) << "\",\n";
+        json << "  \"inventoryRead\": " << (snapshot_available ? "true" : "false") << ",\n";
         json << "  \"inventoryWrite\": false,\n";
+        json << "  \"inventoryCandidates\": " << snapshot.candidates << ",\n";
+        json << "  \"inventoryPropertyHits\": " << snapshot.property_hits << ",\n";
         json << "  \"capabilities\": {\n";
         json << "    \"heartbeat\": true,\n";
-        json << "    \"inventorySnapshot\": false,\n";
+        json << "    \"inventorySnapshot\": " << (snapshot_available ? "true" : "false") << ",\n";
         json << "    \"moveItem\": false,\n";
         json << "    \"slotSafeMove\": false\n";
         json << "  },\n";
-        json << "  \"message\": \"Live bridge heartbeat is connected. Runtime inventory object scan/write is guarded until Unreal inventory object operations are verified.\"\n";
+        json << "  \"message\": \"Live bridge heartbeat is connected. Runtime inventory snapshot is read-only; item move/write remains guarded until exact Unreal slot mutation is verified.\"\n";
         json << "}\n";
 
         if (!write_text_atomic(status_path, json.str())) {
@@ -803,13 +837,149 @@ private:
         }
     }
 
+    LiveInventorySnapshotSummary write_live_inventory_snapshot() const {
+        LiveInventorySnapshotSummary summary{};
+        const auto bridge_root = live_bridge_dir();
+        const auto snapshot_path = bridge_root / "snapshot.json";
+        const std::vector<std::string_view> object_tokens{
+            "inventory", "container", "storage", "item", "slot", "bag", "backpack", "mount"
+        };
+        const std::vector<std::string_view> class_probes{
+            "IcarusInventoryComponent",
+            "InventoryComponent",
+            "PlayerInventoryComponent",
+            "DeployableInventoryComponent",
+            "ContainerInventoryComponent",
+            "InventoryManager",
+            "Inventory",
+            "ItemContainer",
+            "ItemContainerComponent",
+            "ItemableComponent",
+            "ItemComponent",
+            "IcarusItem",
+            "ItemData"
+        };
+
+        try {
+            struct Candidate {
+                RC::Unreal::UObject* object{};
+                std::string class_probe;
+                std::string full_name;
+            };
+
+            constexpr std::size_t max_candidates = 80;
+            std::vector<Candidate> candidates;
+            std::unordered_set<std::uintptr_t> seen;
+
+            for (const auto probe : class_probes) {
+                std::vector<RC::Unreal::UObject*> found_objects;
+                try {
+                    RC::Unreal::UObjectGlobals::FindAllOf(probe, found_objects);
+                } catch (...) {
+                    continue;
+                }
+
+                for (auto* object : found_objects) {
+                    if (!object || candidates.size() >= max_candidates) {
+                        continue;
+                    }
+                    const auto key = reinterpret_cast<std::uintptr_t>(object);
+                    if (seen.find(key) != seen.end()) {
+                        continue;
+                    }
+
+                    std::string full_name;
+                    try {
+                        full_name = narrow_unreal(object->GetFullName());
+                    } catch (...) {
+                        full_name = "<name_error>";
+                    }
+                    if (!contains_any_i(full_name, object_tokens)) {
+                        continue;
+                    }
+
+                    seen.insert(key);
+                    candidates.push_back(Candidate{object, std::string(probe), std::move(full_name)});
+                }
+                if (candidates.size() >= max_candidates) {
+                    break;
+                }
+            }
+
+            summary.candidates = candidates.size();
+
+            std::ostringstream json;
+            json << "{\n";
+            json << "  \"schema\": 1,\n";
+            json << "  \"bridgeVersion\": \"0.2\",\n";
+            json << "  \"timestampUnix\": " << unix_time_seconds() << ",\n";
+            json << "  \"readOnly\": true,\n";
+            json << "  \"candidateCount\": " << candidates.size() << ",\n";
+            json << "  \"classProbes\": [";
+            for (std::size_t index = 0; index < class_probes.size(); ++index) {
+                if (index > 0) {
+                    json << ", ";
+                }
+                json << "\"" << json_escape(class_probes[index]) << "\"";
+            }
+            json << "],\n";
+            json << "  \"objects\": [\n";
+
+            for (std::size_t index = 0; index < candidates.size(); ++index) {
+                const auto& candidate = candidates[index];
+                json << "    {\n";
+                json << "      \"id\": \"" << reinterpret_cast<std::uintptr_t>(candidate.object) << "\",\n";
+                json << "      \"classProbe\": \"" << json_escape(candidate.class_probe) << "\",\n";
+                json << "      \"object\": \"" << json_escape(candidate.full_name) << "\",\n";
+                json << "      \"properties\": [";
+
+                json << "{\"name\":\"<object>\",\"class\":\"" << json_escape(candidate.class_probe)
+                     << "\",\"value\":\"" << json_escape(candidate.full_name) << "\"}";
+                ++summary.property_hits;
+                json << "]\n";
+                json << "    }";
+                if (index + 1 < candidates.size()) {
+                    json << ",";
+                }
+                json << "\n";
+            }
+
+            json << "  ]\n";
+            json << "}\n";
+
+            summary.snapshot_written = write_text_atomic(snapshot_path, json.str());
+            if (!summary.snapshot_written) {
+                append_log(root_, "LIVE_BRIDGE SnapshotWriteFailed Path=" + narrow(snapshot_path));
+            } else {
+                append_log(
+                    root_,
+                    "LIVE_BRIDGE Snapshot Candidates=" + std::to_string(summary.candidates)
+                    + " PropertyHits=" + std::to_string(summary.property_hits)
+                    + " Path=" + narrow(snapshot_path)
+                );
+            }
+        } catch (...) {
+            append_log(root_, "LIVE_BRIDGE SnapshotError");
+            summary = {};
+        }
+
+        return summary;
+    }
+
     void live_bridge_loop() {
         append_log(root_, "LIVE_BRIDGE HeartbeatLoopStarted");
+        LiveInventorySnapshotSummary snapshot{};
+        auto next_snapshot = std::chrono::steady_clock::now();
         while (live_bridge_running_.load()) {
-            write_live_bridge_status("running");
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= next_snapshot) {
+                snapshot = write_live_inventory_snapshot();
+                next_snapshot = now + std::chrono::seconds(8);
+            }
+            write_live_bridge_status("running", snapshot);
             std::this_thread::sleep_for(std::chrono::seconds(2));
         }
-        write_live_bridge_status("stopped");
+        write_live_bridge_status("stopped", snapshot);
         append_log(root_, "LIVE_BRIDGE HeartbeatLoopStopped");
     }
 

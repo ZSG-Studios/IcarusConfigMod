@@ -1329,6 +1329,10 @@ class Configurator(tk.Tk):
         capabilities = status.get("capabilities", {})
         inventory_read = bool(status.get("inventoryRead")) or (isinstance(capabilities, dict) and bool(capabilities.get("inventorySnapshot")))
         inventory_write = bool(status.get("inventoryWrite")) or (isinstance(capabilities, dict) and bool(capabilities.get("moveItem")))
+        inventory_candidates = status.get("inventoryCandidates", 0)
+        inventory_property_hits = status.get("inventoryPropertyHits", 0)
+        snapshot_path = status.get("snapshotPath", "")
+        bridge_version = status.get("bridgeVersion", "unknown")
         state = "connected" if fresh else f"stale ({age}s old)"
         self.live_bridge_status_var.set(
             "Live bridge: "
@@ -1336,16 +1340,21 @@ class Configurator(tk.Tk):
             + f" | pid={status.get('pid', 'unknown')}"
             + f" | inventory read={'yes' if inventory_read else 'guarded'}"
             + f" | inventory write={'yes' if inventory_write else 'guarded'}"
+            + f" | candidates={inventory_candidates}"
         )
         message = str(status.get("message") or "")
         set_live_lines(
             [
                 f"State: {state}",
+                f"Bridge version: {bridge_version}",
                 f"Runtime PID: {status.get('pid', 'unknown')}",
                 f"Mod: {status.get('modName', 'Configuration_Mod')}",
                 f"Inventory snapshot: {'enabled' if inventory_read else 'guarded'}",
+                f"Inventory candidates: {inventory_candidates}",
+                f"Inventory property hits: {inventory_property_hits}",
                 f"Slot-safe live move: {'enabled' if inventory_write else 'guarded'}",
                 f"Heartbeat: {self.live_bridge_status_path}",
+                f"Snapshot: {snapshot_path or '(not written yet)'}",
                 message or "Live bridge heartbeat connected.",
             ]
         )
