@@ -64,6 +64,18 @@ Partial=0 Pending=0 Skipped=0 Unsupported=0 MissingFields=0
 
 If `GreenLight=NO`, check nearby `SETTING_STATUS` lines to see which active setting needs attention.
 
+### Debug Validation
+
+Developer builds support an opt-in `[debug_validation]` section in `settings.ini`. Normal generated configs leave it disabled. When enabled with `forceAllSupported = true`, the DLL forces supported settings to non-vanilla test values, captures the default/current value before each mutation, computes the expected value, writes it, reads it back, and fails validation if the result does not match.
+
+Install a local full-validation runtime:
+
+```powershell
+python tools\scripts\install_runtime.py --debug-validation --debug-log-each
+```
+
+Use `--debug-risky-arrays` only when intentionally testing free-craft style array clearing. The runtime log will include `VALIDATION DebugConfig`, `MATH_CHECK`, `MATH_CHECK_FAIL`, `SETTING_STATUS`, and `VALIDATION GreenLight` lines.
+
 ## Save Backups
 
 The configurator has a `Save Backups` tab for Icarus player/world saves. It backs up these save components when present:

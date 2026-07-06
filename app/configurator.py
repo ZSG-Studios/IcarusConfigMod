@@ -1632,6 +1632,22 @@ class Configurator(tk.Tk):
             lines.append(f"; {spec.label}")
             lines.append(f"{spec.key} = {self.decimal_ini_value(runtime_values[spec.key])}")
             lines.append(f"{RUNTIME_INI_KEYS[spec.key]} = {self.decimal_ini_value(runtime_values[spec.key])}")
+        lines.extend(
+            [
+                "",
+                "[debug_validation]",
+                "; Opt-in runtime validation harness. Leave disabled for normal play.",
+                "; When enabled with forceAllSupported, the DLL forces supported settings to test values,",
+                "; captures each default value before mutation, computes expected math, writes, and reads back.",
+                "enabled = false",
+                "forceAllSupported = false",
+                "testMultiplier = 2",
+                "directAmount = 100",
+                "boolValue = true",
+                "includeRiskyArrayEdits = false",
+                "logEachMathCheck = false",
+            ]
+        )
         lines.extend(["", "[notes]", "backend = ue4ss-cpp-dll", "ue4ssRuntime = true", ""])
         return "\n".join(lines)
 

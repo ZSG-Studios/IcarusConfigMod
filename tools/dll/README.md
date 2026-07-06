@@ -44,3 +44,16 @@ The release packager ships `main.dll` at the player package root for a clean dow
 The configurator copies that root `main.dll` into `Configuration_Mod\dlls\main.dll` when installing into the game.
 
 Players do not receive the UE4SS C++ template, build cache, headers, or source.
+
+## Debug Validation
+
+The DLL reads an opt-in `[debug_validation]` section from `settings.ini`.
+With `enabled = true` and `forceAllSupported = true`, supported settings are forced to known test values during runtime validation. Each write captures the default/current value, computes the expected result, writes the value, reads it back, and logs `MATH_CHECK` or `MATH_CHECK_FAIL`.
+
+Local install helper:
+
+```powershell
+python tools\scripts\install_runtime.py --debug-validation --debug-log-each
+```
+
+Add `--debug-risky-arrays` only when deliberately testing array-clearing behavior such as free craft.

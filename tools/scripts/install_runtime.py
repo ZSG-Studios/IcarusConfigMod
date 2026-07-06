@@ -349,6 +349,28 @@ def copy_runtime_package(package: Path, mods_root: Path) -> Path:
     return target
 
 
+def set_debug_validation(package: Path, *, enabled: bool, log_each: bool, risky: bool) -> None:
+    if not enabled:
+        return
+    settings = package / "settings.ini"
+    if not settings.is_file():
+        raise FileNotFoundError(f"Missing generated settings.ini in {package}")
+    text = settings.read_text(encoding="utf-8")
+    replacements = {
+        "enabled = false": "enabled = true",
+        "forceAllSupported = false": "forceAllSupported = true",
+        "logEachMathCheck = false": f"logEachMathCheck = {'true' if log_each else 'false'}",
+        "includeRiskyArrayEdits = false": f"includeRiskyArrayEdits = {'true' if risky else 'false'}",
+    }
+    for before, after in replacements.items():
+        text = text.replace(before, after)
+    settings.write_text(text, encoding="utf-8")
+    print(
+        "OK: enabled debug validation in generated settings.ini "
+        f"(logEachMathCheck={log_each}, includeRiskyArrayEdits={risky})"
+    )
+
+
 def validate_install(win64_dir: Path, installed_mod: Path) -> list[str]:
     errors: list[str] = []
     modern = win64_dir / "ue4ss"
@@ -379,6 +401,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build, install, and validate the Icarus runtime mod setup.")
     parser.add_argument("--check-only", action="store_true", help="Only validate an existing install.")
     parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE, help="Profile JSON to package.")
+    parser.add_argument("--debug-validation", action="store_true", help="Enable opt-in full supported-setting validation in generated settings.ini.")
+    parser.add_argument("--debug-log-each", action="store_true", help="With --debug-validation, log each math check with default/expected/actual values.")
+    parser.add_argument("--debug-risky-arrays", action="store_true", help="With --debug-validation, include risky array-clearing edits such as free craft.")
     args = parser.parse_args()
 
     try:
@@ -398,6 +423,12 @@ def main() -> int:
             if not args.profile.is_file():
                 raise FileNotFoundError(f"Profile missing: {args.profile}")
             package = generate_runtime_package(args.profile)
+            set_debug_validation(
+                package,
+                enabled=args.debug_validation,
+                log_each=args.debug_log_each,
+                risky=args.debug_risky_arrays,
+            )
             ensure_ue4ss(win64_dir)
             ensure_bundled_ue4ss(win64_dir)
             tune_ue4ss_settings(win64_dir)

@@ -9,6 +9,8 @@
 #include <Unreal/NameTypes.hpp>
 #include <Unreal/Property/FArrayProperty.hpp>
 #include <Unreal/Property/FBoolProperty.hpp>
+#include <Unreal/Property/FMapProperty.hpp>
+#include <Unreal/Property/FNameProperty.hpp>
 #include <Unreal/Property/FNumericProperty.hpp>
 #include <Unreal/Property/FStructProperty.hpp>
 #include <Unreal/Core/Containers/ScriptArray.hpp>
@@ -27,10 +29,12 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -102,6 +106,16 @@ std::string narrow(const std::filesystem::path& path) {
 struct RuntimeSettings {
     double air_control{1.0};
     double camera_tilt{1.0};
+};
+
+struct DebugValidationConfig {
+    bool enabled{false};
+    bool force_all_supported{false};
+    bool include_risky_array_edits{false};
+    bool log_each_math_check{false};
+    double multiplier{2.0};
+    double direct_amount{100.0};
+    bool bool_value{true};
 };
 
 enum class NumericMode {
@@ -322,6 +336,20 @@ bool contains_text(std::string_view haystack, std::string_view needle) {
     return haystack.find(needle) != std::string_view::npos;
 }
 
+bool table_stem_matches(std::string_view table_name, std::string_view table_stem) {
+    std::size_t pos = table_name.find(table_stem);
+    while (pos != std::string_view::npos) {
+        const bool before_ok = pos == 0 || (table_name[pos - 1] != '_' && !std::isalnum(static_cast<unsigned char>(table_name[pos - 1])));
+        const std::size_t after_pos = pos + table_stem.size();
+        const bool after_ok = after_pos >= table_name.size() || (table_name[after_pos] != '_' && !std::isalnum(static_cast<unsigned char>(table_name[after_pos])));
+        if (before_ok && after_ok) {
+            return true;
+        }
+        pos = table_name.find(table_stem, pos + 1);
+    }
+    return false;
+}
+
 bool ends_with_text(std::string_view text, std::string_view suffix) {
     return text.size() >= suffix.size() && text.substr(text.size() - suffix.size()) == suffix;
 }
@@ -388,6 +416,28 @@ std::string export_property_text(RC::Unreal::FProperty* property, const void* co
     } catch (...) {
         return {};
     }
+}
+
+std::string export_property_value_text(RC::Unreal::FProperty* property, const void* value) {
+    if (!property || !value) {
+        return {};
+    }
+    try {
+        RC::Unreal::FString exported;
+        property->ExportTextItem(exported, value, value, nullptr, 0);
+        return narrow_unreal(exported);
+    } catch (...) {
+        return {};
+    }
+}
+
+std::string truncate_for_log(std::string text, std::size_t limit = 1200) {
+    if (text.size() <= limit) {
+        return text;
+    }
+    text.resize(limit);
+    text += "...<truncated>";
+    return text;
 }
 
 bool exported_struct_contains(RC::Unreal::UStruct* row_struct, const void* container, std::string_view token) {
@@ -503,6 +553,11 @@ double adjusted_numeric(double baseline, double multiplier, NumericMode mode, Nu
         value = std::round(value);
     }
     return value;
+}
+
+bool numeric_nearly_equal(double actual, double expected) {
+    const double tolerance = (std::max)(0.0001, std::abs(expected) * 0.000001);
+    return std::abs(actual - expected) <= tolerance;
 }
 }
 
@@ -719,7 +774,16 @@ private:
         if (*air_control != adjusted) {
             *air_control = adjusted;
         }
-        return true;
+        const bool ok = numeric_nearly_equal(static_cast<double>(*air_control), static_cast<double>(adjusted));
+        if (!ok) {
+            append_log(
+                root_,
+                "MATH_CHECK_FAIL Context=runtime.air_control Object=" + narrow_unreal(object->GetFullName())
+                    + " Expected=" + std::to_string(adjusted)
+                    + " Actual=" + std::to_string(*air_control)
+            );
+        }
+        return ok;
     }
 
     std::string camera_tilt_status() const {
@@ -741,6 +805,7 @@ private:
         std::size_t applied{0};
         std::size_t missing{0};
         std::size_t skipped{0};
+        std::size_t verify_failed{0};
     };
 
     using SettingStatusMap = std::unordered_map<std::string, SettingStatus>;
@@ -774,19 +839,50 @@ private:
         return status;
     }
 
+    DebugValidationConfig debug_validation_config(const IniConfig& config) const {
+        DebugValidationConfig debug{};
+        debug.enabled = config.get_bool("debug_validation", "enabled", false);
+        debug.force_all_supported = debug.enabled && config.get_bool("debug_validation", "forceAllSupported", config.get_bool("debug_validation", "force_all_supported", false));
+        debug.include_risky_array_edits = debug.enabled && config.get_bool("debug_validation", "includeRiskyArrayEdits", config.get_bool("debug_validation", "include_risky_array_edits", false));
+        debug.log_each_math_check = debug.enabled && config.get_bool("debug_validation", "logEachMathCheck", config.get_bool("debug_validation", "log_each_math_check", false));
+        debug.multiplier = clamped_multiplier(config.get_number("debug_validation", "testMultiplier", config.get_number("debug_validation", "test_multiplier", 2.0)), 0.0001, 1000000.0);
+        if (is_vanilla_multiplier(debug.multiplier)) {
+            debug.multiplier = 2.0;
+        }
+        debug.direct_amount = config.get_number("debug_validation", "directAmount", config.get_number("debug_validation", "direct_amount", 100.0));
+        if (!std::isfinite(debug.direct_amount) || debug.direct_amount <= 0.0) {
+            debug.direct_amount = 100.0;
+        }
+        debug.bool_value = config.get_bool("debug_validation", "boolValue", config.get_bool("debug_validation", "bool_value", true));
+        return debug;
+    }
+
+    double debug_multiplier(double configured, const DebugValidationConfig& debug) const {
+        return debug.force_all_supported ? debug.multiplier : configured;
+    }
+
+    double debug_amount(double configured, const DebugValidationConfig& debug) const {
+        return debug.force_all_supported ? debug.direct_amount : configured;
+    }
+
+    bool debug_bool(bool configured, const DebugValidationConfig& debug) const {
+        return debug.force_all_supported ? debug.bool_value : configured;
+    }
+
     SettingStatusMap initialize_setting_statuses(const IniConfig& config, std::size_t data_tables_seen, std::size_t curve_objects_seen) const {
         SettingStatusMap statuses;
+        const auto debug = debug_validation_config(config);
 
         for (const auto& rule : kNumericTableRules) {
-            const double value = config.get_number(rule.section, rule.key, 1.0);
+            const double value = debug_multiplier(config.get_number(rule.section, rule.key, 1.0), debug);
             auto& status = ensure_setting_status(statuses, rule.section, rule.key, value, !is_vanilla_multiplier(value));
             status.targets_seen += data_tables_seen;
         }
         for (const auto& rule : kRangeGroupRules) {
-            auto& status = ensure_setting_status(statuses, "native_groups", rule.key_prefix, 1.0, false);
+            auto& status = ensure_setting_status(statuses, "native_groups", rule.key_prefix, debug.force_all_supported ? debug.multiplier : 1.0, debug.force_all_supported);
             status.targets_seen += data_tables_seen;
             for (std::size_t index = 0; index < rule.ranges.size(); ++index) {
-                const double value = config.get_number("native_groups", std::string(rule.key_prefix) + std::to_string(index + 1), 1.0);
+                const double value = debug_multiplier(config.get_number("native_groups", std::string(rule.key_prefix) + std::to_string(index + 1), 1.0), debug);
                 if (!is_vanilla_multiplier(value)) {
                     status.active = true;
                     status.value = value;
@@ -794,7 +890,7 @@ private:
             }
         }
         for (const auto& rule : kArrayNumericRules) {
-            const double value = config.get_number(rule.section, rule.key, 1.0);
+            const double value = debug_multiplier(config.get_number(rule.section, rule.key, 1.0), debug);
             auto& status = ensure_setting_status(statuses, rule.section, rule.key, value, !is_vanilla_multiplier(value));
             status.targets_seen += data_tables_seen;
         }
@@ -810,8 +906,12 @@ private:
                 supported ? "" : "array_mutation_disabled"
             );
             status.targets_seen += data_tables_seen;
+            if (debug.force_all_supported && supported) {
+                status.active = true;
+                status.value = debug.multiplier;
+            }
             for (std::size_t index = 0; index < rule.ranges.size(); ++index) {
-                const double value = config.get_number("native_groups", std::string(rule.key_prefix) + std::to_string(index + 1), 1.0);
+                const double value = debug_multiplier(config.get_number("native_groups", std::string(rule.key_prefix) + std::to_string(index + 1), 1.0), debug);
                 if (!is_vanilla_multiplier(value)) {
                     status.active = true;
                     status.value = value;
@@ -819,22 +919,22 @@ private:
             }
         }
         for (const auto& rule : kStatArrayRules) {
-            const double value = config.get_number("table_multipliers", rule.key, 1.0);
+            const double value = debug_multiplier(config.get_number("table_multipliers", rule.key, 1.0), debug);
             auto& status = ensure_setting_status(statuses, "table_multipliers", rule.key, value, !is_vanilla_multiplier(value));
             status.targets_seen += data_tables_seen;
         }
         for (const auto& rule : kBoolTableRules) {
-            const bool value = config.get_bool("direct_settings", rule.key, false);
+            const bool value = debug_bool(config.get_bool("direct_settings", rule.key, false), debug);
             auto& status = ensure_setting_status(statuses, "direct_settings", rule.key, value ? 1.0 : 0.0, value);
             status.targets_seen += data_tables_seen;
         }
         for (const auto& rule : kMissionRewardRules) {
-            const double value = config.get_number("direct_settings", rule.key, 0.0);
+            const double value = debug_amount(config.get_number("direct_settings", rule.key, 0.0), debug);
             auto& status = ensure_setting_status(statuses, "direct_settings", rule.key, value, std::isfinite(value) && value > 0.0);
             status.targets_seen += data_tables_seen;
         }
         for (const auto& rule : kGrowthCurveRules) {
-            const double value = config.get_number("growth_curves", rule.key, 1.0);
+            const double value = debug_multiplier(config.get_number("growth_curves", rule.key, 1.0), debug);
             auto& status = ensure_setting_status(statuses, "growth_curves", rule.key, value, !is_vanilla_multiplier(value));
             status.targets_seen += curve_objects_seen;
         }
@@ -842,8 +942,9 @@ private:
             const double value = config.get_number(rule.section, rule.key, rule.fallback);
             ensure_setting_status(statuses, rule.section, rule.key, value, std::isfinite(value) && value != rule.fallback, false, rule.reason);
         }
-        ensure_setting_status(statuses, "direct_settings", "free_craft", config.get_bool("direct_settings", "free_craft", false) ? 1.0 : 0.0, config.get_bool("direct_settings", "free_craft", false));
-        const double lucky_strike = config.get_number("direct_settings", "lucky_strike_chance", 1.0);
+        const bool free_craft = debug.include_risky_array_edits ? true : config.get_bool("direct_settings", "free_craft", false);
+        ensure_setting_status(statuses, "direct_settings", "free_craft", free_craft ? 1.0 : 0.0, free_craft);
+        const double lucky_strike = debug_multiplier(config.get_number("direct_settings", "lucky_strike_chance", 1.0), debug);
         auto& lucky_status = ensure_setting_status(statuses, "direct_settings", "lucky_strike_chance", lucky_strike, !is_vanilla_multiplier(lucky_strike));
         lucky_status.targets_seen += data_tables_seen;
 
@@ -860,6 +961,7 @@ private:
         std::size_t partial = 0;
         std::size_t active_total = 0;
         std::size_t missing_fields = 0;
+        std::size_t verify_failed = 0;
 
         for (const auto& [id, status] : statuses) {
             ++total;
@@ -874,6 +976,14 @@ private:
                 ++unsupported;
                 if (reason.empty()) {
                     reason = "not_implemented";
+                }
+            } else if (status.verify_failed > 0) {
+                ++active_total;
+                ++partial;
+                verify_failed += status.verify_failed;
+                result = "partial";
+                if (reason.empty()) {
+                    reason = "math_verify_failed";
                 }
             } else if (status.skipped > 0 && status.applied == 0) {
                 ++active_total;
@@ -916,6 +1026,7 @@ private:
                     + " Applied=" + std::to_string(status.applied)
                     + " Missing=" + std::to_string(status.missing)
                     + " Skipped=" + std::to_string(status.skipped)
+                    + " VerifyFailed=" + std::to_string(status.verify_failed)
                     + " Reason=" + reason
             );
         }
@@ -931,12 +1042,13 @@ private:
                 + " Skipped=" + std::to_string(skipped)
                 + " Unsupported=" + std::to_string(unsupported)
                 + " MissingFields=" + std::to_string(missing_fields)
+                + " VerifyFailed=" + std::to_string(verify_failed)
                 + " Inactive=" + std::to_string(inactive)
         );
         append_log(
             root_,
             "VALIDATION GreenLight Phase=" + std::string(phase)
-                + " GreenLight=" + std::string((partial == 0 && pending == 0 && skipped == 0 && unsupported == 0) ? "YES" : "NO")
+                + " GreenLight=" + std::string((partial == 0 && pending == 0 && skipped == 0 && unsupported == 0 && verify_failed == 0) ? "YES" : "NO")
                 + " Active=" + std::to_string(active_total)
                 + " Applied=" + std::to_string(applied)
                 + " Partial=" + std::to_string(partial)
@@ -944,6 +1056,7 @@ private:
                 + " Skipped=" + std::to_string(skipped)
                 + " Unsupported=" + std::to_string(unsupported)
                 + " MissingFields=" + std::to_string(missing_fields)
+                + " VerifyFailed=" + std::to_string(verify_failed)
         );
     }
 
@@ -981,11 +1094,27 @@ private:
 
     bool apply_table_settings(std::string_view phase) {
         try {
+            mutation_math_checks_ = 0;
+            mutation_math_failures_ = 0;
+            mutation_math_logs_ = 0;
             IniConfig config;
             const bool ini_read = config.load(find_unified_ini(root_));
             if (!ini_read) {
                 append_log(root_, "ERROR: table apply skipped because settings.ini could not be read.");
                 return false;
+            }
+            const auto debug = debug_validation_config(config);
+            mutation_debug_log_each_ = debug.enabled && debug.log_each_math_check;
+            if (debug.enabled) {
+                append_log(
+                    root_,
+                    "VALIDATION DebugConfig Enabled=true ForceAllSupported=" + std::string(debug.force_all_supported ? "true" : "false")
+                        + " Multiplier=" + std::to_string(debug.multiplier)
+                        + " DirectAmount=" + std::to_string(debug.direct_amount)
+                        + " BoolValue=" + std::string(debug.bool_value ? "true" : "false")
+                        + " IncludeRiskyArrayEdits=" + std::string(debug.include_risky_array_edits ? "true" : "false")
+                        + " LogEachMathCheck=" + std::string(debug.log_each_math_check ? "true" : "false")
+                );
             }
 
             std::vector<RC::Unreal::UObject*> data_tables;
@@ -1010,7 +1139,7 @@ private:
             std::size_t direct_reward_fields_missing = 0;
             std::size_t arrays_cleared = 0;
             std::size_t arrays_clear_missing = 0;
-            const auto curve_result = apply_growth_curves(config, phase);
+            const auto curve_result = apply_growth_curves(config, phase, debug);
 
             for (RC::Unreal::UObject* table : data_tables) {
                 if (!table || !RC::Unreal::UObject::IsReal(table)) {
@@ -1023,86 +1152,100 @@ private:
                 bool matched_this_table = false;
 
                 for (const auto& rule : kNumericTableRules) {
-                    if (!contains_text(table_name, rule.table_stem)) {
+                    if (!table_stem_matches(table_name, rule.table_stem)) {
                         continue;
                     }
                     matched_this_table = true;
                     auto& status = setting_statuses[setting_id(rule.section, rule.key)];
                     ++status.targets_matched;
-                    const double multiplier = clamped_multiplier(config.get_number(rule.section, rule.key, 1.0), 0.0, 1000000.0);
+                    const double multiplier = clamped_multiplier(debug_multiplier(config.get_number(rule.section, rule.key, 1.0), debug), 0.0, 1000000.0);
                     if (is_vanilla_multiplier(multiplier)) {
                         continue;
                     }
+                    std::size_t rule_applied = 0;
+                    std::size_t rule_missing = 0;
                     for (const char* field : rule.fields) {
+                        const auto verify_failures_before = mutation_math_failures_;
                         const auto applied = apply_numeric_table_field(table, rule, field, multiplier);
-                        numeric_fields_applied += applied.first;
-                        numeric_fields_missing += applied.second;
-                        status.applied += applied.first;
-                        status.missing += applied.second;
+                        rule_applied += applied.first;
+                        rule_missing += applied.second;
+                        status.verify_failed += mutation_math_failures_ - verify_failures_before;
+                    }
+                    numeric_fields_applied += rule_applied;
+                    status.applied += rule_applied;
+                    if (rule_applied == 0) {
+                        numeric_fields_missing += rule_missing;
+                        status.missing += rule_missing;
                     }
                 }
 
                 for (const auto& rule : kRangeGroupRules) {
-                    if (!contains_text(table_name, rule.table_stem)) {
+                    if (!table_stem_matches(table_name, rule.table_stem)) {
                         continue;
                     }
                     matched_this_table = true;
                     auto& status = setting_statuses[setting_id("native_groups", rule.key_prefix)];
                     ++status.targets_matched;
-                    if (!range_group_has_active_setting(rule, config)) {
+                    if (!range_group_has_active_setting(rule, config, debug)) {
                         continue;
                     }
-                    const auto applied = apply_range_group(table, rule, config);
+                    const auto verify_failures_before = mutation_math_failures_;
+                    const auto applied = apply_range_group(table, rule, config, debug);
                     range_fields_applied += applied.first;
                     range_fields_missing += applied.second;
                     status.applied += applied.first;
                     status.missing += applied.second;
+                    status.verify_failed += mutation_math_failures_ - verify_failures_before;
                 }
 
                 for (const auto& rule : kArrayNumericRules) {
-                    if (!contains_text(table_name, rule.table_stem)) {
+                    if (!table_stem_matches(table_name, rule.table_stem)) {
                         continue;
                     }
                     matched_this_table = true;
                     auto& status = setting_statuses[setting_id(rule.section, rule.key)];
                     ++status.targets_matched;
-                    const double multiplier = clamped_multiplier(config.get_number(rule.section, rule.key, 1.0), 0.0, 1000000.0);
+                    const double multiplier = clamped_multiplier(debug_multiplier(config.get_number(rule.section, rule.key, 1.0), debug), 0.0, 1000000.0);
                     if (is_vanilla_multiplier(multiplier)) {
                         continue;
                     }
+                    const auto verify_failures_before = mutation_math_failures_;
                     const auto applied = apply_array_numeric_field(table, rule, multiplier);
                     array_fields_applied += applied.first;
                     array_fields_missing += applied.second;
                     status.applied += applied.first;
                     status.missing += applied.second;
+                    status.verify_failed += mutation_math_failures_ - verify_failures_before;
                 }
 
                 for (const auto& rule : kStatArrayRules) {
-                    if (!contains_text(table_name, rule.table_stem)) {
+                    if (!table_stem_matches(table_name, rule.table_stem)) {
                         continue;
                     }
                     matched_this_table = true;
                     auto& status = setting_statuses[setting_id("table_multipliers", rule.key)];
                     ++status.targets_matched;
-                    const double multiplier = clamped_multiplier(config.get_number("table_multipliers", rule.key, 1.0), 0.0, 1000000.0);
+                    const double multiplier = clamped_multiplier(debug_multiplier(config.get_number("table_multipliers", rule.key, 1.0), debug), 0.0, 1000000.0);
                     if (is_vanilla_multiplier(multiplier)) {
                         continue;
                     }
+                    const auto verify_failures_before = mutation_math_failures_;
                     const auto applied = apply_stat_array_rule(table, rule, multiplier);
                     stat_fields_applied += applied.first;
                     stat_fields_missing += applied.second;
                     status.applied += applied.first;
                     status.missing += applied.second;
+                    status.verify_failed += mutation_math_failures_ - verify_failures_before;
                 }
 
                 for (const auto& rule : kArrayRangeGroupRules) {
-                    if (!contains_text(table_name, rule.table_stem)) {
+                    if (!table_stem_matches(table_name, rule.table_stem)) {
                         continue;
                     }
                     matched_this_table = true;
                     auto& status = setting_statuses[setting_id("native_groups", rule.key_prefix)];
                     ++status.targets_matched;
-                    if (!array_range_group_has_active_setting(rule, config)) {
+                    if (!array_range_group_has_active_setting(rule, config, debug)) {
                         continue;
                     }
                     if (!array_range_group_mutation_enabled(rule)) {
@@ -1111,67 +1254,76 @@ private:
                         append_log(root_, "SAFETY_SKIP ArrayMutationDisabled Table=" + table_name + " KeyPrefix=" + std::string(rule.key_prefix));
                         continue;
                     }
-                    const auto applied = apply_array_range_group(table, rule, config);
+                    const auto verify_failures_before = mutation_math_failures_;
+                    const auto applied = apply_array_range_group(table, rule, config, debug);
                     array_fields_applied += applied.first;
                     array_fields_missing += applied.second;
                     status.applied += applied.first;
                     status.missing += applied.second;
+                    status.verify_failed += mutation_math_failures_ - verify_failures_before;
                 }
 
                 for (const auto& rule : kBoolTableRules) {
-                    if (!contains_text(table_name, rule.table_stem)) {
+                    if (!table_stem_matches(table_name, rule.table_stem)) {
                         continue;
                     }
                     matched_this_table = true;
                     auto& status = setting_statuses[setting_id("direct_settings", rule.key)];
                     ++status.targets_matched;
-                    if (!config.get_bool("direct_settings", rule.key, false)) {
+                    if (!debug_bool(config.get_bool("direct_settings", rule.key, false), debug)) {
                         continue;
                     }
+                    const auto verify_failures_before = mutation_math_failures_;
                     const auto applied = apply_bool_table_rule(table, rule);
                     bool_fields_applied += applied.first;
                     bool_fields_missing += applied.second;
                     status.applied += applied.first;
                     status.missing += applied.second;
+                    status.verify_failed += mutation_math_failures_ - verify_failures_before;
                 }
 
                 for (const auto& rule : kMissionRewardRules) {
-                    if (!contains_text(table_name, rule.table_stem)) {
+                    if (!table_stem_matches(table_name, rule.table_stem)) {
                         continue;
                     }
                     matched_this_table = true;
                     auto& status = setting_statuses[setting_id("direct_settings", rule.key)];
                     ++status.targets_matched;
-                    const double amount = config.get_number("direct_settings", rule.key, 0.0);
+                    const double amount = debug_amount(config.get_number("direct_settings", rule.key, 0.0), debug);
                     if (!std::isfinite(amount) || amount <= 0.0) {
                         continue;
                     }
+                    const auto verify_failures_before = mutation_math_failures_;
                     const auto applied = apply_mission_reward_rule(table, rule, amount);
                     direct_reward_fields_applied += applied.first;
                     direct_reward_fields_missing += applied.second;
                     status.applied += applied.first;
                     status.missing += applied.second;
+                    status.verify_failed += mutation_math_failures_ - verify_failures_before;
                 }
 
                 if (contains_text(table_name, "D_Talents")) {
                     matched_this_table = true;
                     auto& status = setting_statuses[setting_id("direct_settings", "lucky_strike_chance")];
                     ++status.targets_matched;
-                    const double multiplier = clamped_multiplier(config.get_number("direct_settings", "lucky_strike_chance", 1.0), 0.0, 1000000.0);
+                    const double multiplier = clamped_multiplier(debug_multiplier(config.get_number("direct_settings", "lucky_strike_chance", 1.0), debug), 0.0, 1000000.0);
                     if (!is_vanilla_multiplier(multiplier)) {
+                        const auto verify_failures_before = mutation_math_failures_;
                         const auto applied = apply_lucky_strike_rule(table, multiplier);
                         stat_fields_applied += applied.first;
                         stat_fields_missing += applied.second;
                         status.applied += applied.first;
                         status.missing += applied.second;
+                        status.verify_failed += mutation_math_failures_ - verify_failures_before;
                     }
                 }
 
                 if (contains_text(table_name, "D_ProcessorRecipes")) {
                     matched_this_table = true;
-                    if (config.get_bool("direct_settings", "free_craft", config.get_bool("direct_settings", "freeCraft", false))) {
+                    if ((debug.include_risky_array_edits && debug.force_all_supported) || config.get_bool("direct_settings", "free_craft", config.get_bool("direct_settings", "freeCraft", false))) {
                         auto& status = setting_statuses[setting_id("direct_settings", "free_craft")];
                         ++status.targets_matched;
+                        const auto verify_failures_before = mutation_math_failures_;
                         const auto inputs = clear_array_field(table, "Inputs");
                         const auto query_inputs = clear_array_field(table, "QueryInputs");
                         const auto resource_inputs = clear_array_field(table, "ResourceInputs");
@@ -1181,6 +1333,7 @@ private:
                         array_fields_missing += missing;
                         status.applied += cleared;
                         status.missing += missing;
+                        status.verify_failed += mutation_math_failures_ - verify_failures_before;
                     }
                 }
 
@@ -1213,6 +1366,8 @@ private:
                     + " CurveObjectsMatched=" + std::to_string(curve_result.objects_matched)
                     + " CurveKeysApplied=" + std::to_string(curve_result.keys_applied)
                     + " CurveKeysMissing=" + std::to_string(curve_result.keys_missing)
+                    + " MathChecks=" + std::to_string(mutation_math_checks_)
+                    + " MathFailures=" + std::to_string(mutation_math_failures_)
             );
             merge_curve_statuses(setting_statuses, curve_result);
             log_setting_statuses(setting_statuses, phase);
@@ -1237,6 +1392,7 @@ private:
         std::size_t applied{0};
         std::size_t missing{0};
         std::size_t skipped{0};
+        std::size_t verify_failed{0};
         std::string reason;
     };
 
@@ -1261,13 +1417,14 @@ private:
             status.applied += curve_status.applied;
             status.missing += curve_status.missing;
             status.skipped += curve_status.skipped;
+            status.verify_failed += curve_status.verify_failed;
             if (!curve_status.reason.empty()) {
                 status.reason = curve_status.reason;
             }
         }
     }
 
-    CurveApplyResult apply_growth_curves(const IniConfig& config, std::string_view phase) {
+    CurveApplyResult apply_growth_curves(const IniConfig& config, std::string_view phase, const DebugValidationConfig& debug) {
         CurveApplyResult result{};
 
         std::vector<RC::Unreal::UObject*> curve_objects;
@@ -1279,7 +1436,7 @@ private:
         bool any_asset_missing = false;
 
         for (const auto& rule : kGrowthCurveRules) {
-            const double multiplier = clamped_multiplier(config.get_number("growth_curves", rule.key, 1.0), 0.0, 1000000.0);
+            const double multiplier = clamped_multiplier(debug_multiplier(config.get_number("growth_curves", rule.key, 1.0), debug), 0.0, 1000000.0);
             if (is_vanilla_multiplier(multiplier)) {
                 continue;
             }
@@ -1300,9 +1457,11 @@ private:
                 matched_rule = true;
                 ++rule_status.matched;
                 ++result.objects_matched;
+                const auto verify_failures_before = mutation_math_failures_;
                 const auto applied = apply_curve_float_keys(curve, rule, multiplier, phase);
                 rule_status.applied += applied.first;
                 rule_status.missing += applied.second;
+                rule_status.verify_failed += mutation_math_failures_ - verify_failures_before;
                 result.keys_applied += applied.first;
                 result.keys_missing += applied.second;
                 if (applied.first == 0) {
@@ -1393,16 +1552,15 @@ private:
                 continue;
             }
 
-            const double current = value_property->IsFloatingPoint()
-                ? value_property->GetFloatingPointPropertyValue(value_ptr)
-                : static_cast<double>(value_property->GetSignedIntPropertyValue(value_ptr));
+            const double current = read_numeric_value(value_property, value_ptr);
             const double baseline = curve_key_baselines_.try_emplace(value_ptr, current).first->second;
             const double adjusted = std::max(0.0, baseline * multiplier);
-            if (value_property->IsFloatingPoint()) {
-                value_property->SetFloatingPointPropertyValue(value_ptr, adjusted);
-            } else {
-                value_property->SetIntPropertyValue(value_ptr, static_cast<int64_t>(std::llround(adjusted)));
-            }
+            write_numeric_checked(
+                value_property,
+                value_ptr,
+                adjusted,
+                "curve=" + narrow_unreal(curve->GetFullName()) + ";setting=" + rule.key + ";keyIndex=" + std::to_string(index)
+            );
             ++applied;
         }
 
@@ -1605,37 +1763,37 @@ private:
             return false;
         }
         for (const auto& rule : kNumericTableRules) {
-            if (contains_text(table_name, rule.table_stem)) {
+            if (table_stem_matches(table_name, rule.table_stem)) {
                 return true;
             }
         }
         for (const auto& rule : kRangeGroupRules) {
-            if (contains_text(table_name, rule.table_stem)) {
+            if (table_stem_matches(table_name, rule.table_stem)) {
                 return true;
             }
         }
         for (const auto& rule : kArrayNumericRules) {
-            if (contains_text(table_name, rule.table_stem)) {
+            if (table_stem_matches(table_name, rule.table_stem)) {
                 return true;
             }
         }
         for (const auto& rule : kArrayRangeGroupRules) {
-            if (contains_text(table_name, rule.table_stem)) {
+            if (table_stem_matches(table_name, rule.table_stem)) {
                 return true;
             }
         }
         for (const auto& rule : kStatArrayRules) {
-            if (contains_text(table_name, rule.table_stem)) {
+            if (table_stem_matches(table_name, rule.table_stem)) {
                 return true;
             }
         }
         for (const auto& rule : kBoolTableRules) {
-            if (contains_text(table_name, rule.table_stem)) {
+            if (table_stem_matches(table_name, rule.table_stem)) {
                 return true;
             }
         }
         for (const auto& rule : kMissionRewardRules) {
-            if (contains_text(table_name, rule.table_stem)) {
+            if (table_stem_matches(table_name, rule.table_stem)) {
                 return true;
             }
         }
@@ -1645,7 +1803,10 @@ private:
         return false;
     }
 
-    bool range_group_has_active_setting(const RangeGroupRule& rule, const IniConfig& config) const {
+    bool range_group_has_active_setting(const RangeGroupRule& rule, const IniConfig& config, const DebugValidationConfig& debug) const {
+        if (debug.force_all_supported) {
+            return true;
+        }
         for (std::size_t index = 0; index < rule.ranges.size(); ++index) {
             const double multiplier = clamped_multiplier(
                 config.get_number("native_groups", std::string(rule.key_prefix) + std::to_string(index + 1), 1.0),
@@ -1659,7 +1820,10 @@ private:
         return false;
     }
 
-    bool array_range_group_has_active_setting(const ArrayRangeGroupRule& rule, const IniConfig& config) const {
+    bool array_range_group_has_active_setting(const ArrayRangeGroupRule& rule, const IniConfig& config, const DebugValidationConfig& debug) const {
+        if (debug.force_all_supported) {
+            return true;
+        }
         for (std::size_t index = 0; index < rule.ranges.size(); ++index) {
             const double multiplier = clamped_multiplier(
                 config.get_number("native_groups", std::string(rule.key_prefix) + std::to_string(index + 1), 1.0),
@@ -1671,6 +1835,108 @@ private:
             }
         }
         return false;
+    }
+
+    double read_numeric_value(RC::Unreal::FNumericProperty* property, void* value_ptr) const {
+        if (!property || !value_ptr) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        return property->IsFloatingPoint()
+            ? property->GetFloatingPointPropertyValue(value_ptr)
+            : static_cast<double>(property->GetSignedIntPropertyValue(value_ptr));
+    }
+
+    bool write_numeric_checked(
+        RC::Unreal::FNumericProperty* property,
+        void* value_ptr,
+        double expected,
+        const std::string& context
+    ) {
+        if (!property || !value_ptr) {
+            ++mutation_math_failures_;
+            return false;
+        }
+
+        const double before = read_numeric_value(property, value_ptr);
+        if (property->IsFloatingPoint()) {
+            property->SetFloatingPointPropertyValue(value_ptr, expected);
+        } else {
+            property->SetIntPropertyValue(value_ptr, static_cast<int64_t>(std::llround(expected)));
+            expected = static_cast<double>(std::llround(expected));
+        }
+
+        ++mutation_math_checks_;
+        const double actual = read_numeric_value(property, value_ptr);
+        const bool ok = std::isfinite(actual) && numeric_nearly_equal(actual, expected);
+        if (mutation_debug_log_each_ && mutation_math_logs_ < 400) {
+            ++mutation_math_logs_;
+            append_log(
+                root_,
+                "MATH_CHECK Context=" + context
+                    + " Property=" + narrow_unreal(property->GetName())
+                    + " DefaultBefore=" + std::to_string(before)
+                    + " Expected=" + std::to_string(expected)
+                    + " Actual=" + std::to_string(actual)
+                    + " Result=" + std::string(ok ? "PASS" : "FAIL")
+            );
+        }
+        if (!ok) {
+            ++mutation_math_failures_;
+            if (mutation_math_logs_ < 80) {
+                ++mutation_math_logs_;
+                append_log(
+                    root_,
+                    "MATH_CHECK_FAIL Context=" + context
+                        + " Property=" + narrow_unreal(property->GetName())
+                        + " Expected=" + std::to_string(expected)
+                        + " Actual=" + std::to_string(actual)
+                );
+            }
+        }
+        return ok;
+    }
+
+    bool write_bool_checked(
+        RC::Unreal::FBoolProperty* property,
+        void* value_ptr,
+        bool expected,
+        const std::string& context
+    ) {
+        if (!property || !value_ptr) {
+            ++mutation_math_failures_;
+            return false;
+        }
+        const bool before = property->GetPropertyValue(value_ptr);
+        property->SetPropertyValue(value_ptr, expected);
+        ++mutation_math_checks_;
+        const bool actual = property->GetPropertyValue(value_ptr);
+        const bool ok = actual == expected;
+        if (mutation_debug_log_each_ && mutation_math_logs_ < 400) {
+            ++mutation_math_logs_;
+            append_log(
+                root_,
+                "MATH_CHECK Context=" + context
+                    + " Property=" + narrow_unreal(property->GetName())
+                    + " DefaultBefore=" + std::string(before ? "true" : "false")
+                    + " Expected=" + std::string(expected ? "true" : "false")
+                    + " Actual=" + std::string(actual ? "true" : "false")
+                    + " Result=" + std::string(ok ? "PASS" : "FAIL")
+            );
+        }
+        if (!ok) {
+            ++mutation_math_failures_;
+            if (mutation_math_logs_ < 80) {
+                ++mutation_math_logs_;
+                append_log(
+                    root_,
+                    "MATH_CHECK_FAIL Context=" + context
+                        + " Property=" + narrow_unreal(property->GetName())
+                        + " Expected=" + std::string(expected ? "true" : "false")
+                        + " Actual=" + std::string(actual ? "true" : "false")
+                );
+            }
+        }
+        return ok;
     }
 
     std::pair<std::size_t, std::size_t> apply_numeric_table_field(
@@ -1689,6 +1955,10 @@ private:
         RC::Unreal::FProperty* property = find_struct_property_by_name(row_struct, field_name);
         auto* numeric_property = as_numeric_property(property);
         if (!numeric_property) {
+            const auto nested = apply_nested_numeric_table_field(table, row_map, row_struct, rule, field_name, multiplier);
+            if (nested.first > 0) {
+                return nested;
+            }
             append_log(
                 root_,
                 "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
@@ -1716,19 +1986,75 @@ private:
                 ++missing;
                 continue;
             }
-            const double current = numeric_property->IsFloatingPoint()
-                ? numeric_property->GetFloatingPointPropertyValue(value_ptr)
-                : static_cast<double>(numeric_property->GetSignedIntPropertyValue(value_ptr));
+            const double current = read_numeric_value(numeric_property, value_ptr);
             const double baseline = numeric_baselines_.try_emplace(value_ptr, current).first->second;
             const double adjusted = adjusted_numeric(baseline, multiplier, rule.mode, rule.result, rule.minimum);
-            if (numeric_property->IsFloatingPoint()) {
-                numeric_property->SetFloatingPointPropertyValue(value_ptr, adjusted);
-            } else {
-                numeric_property->SetIntPropertyValue(value_ptr, static_cast<int64_t>(std::llround(adjusted)));
-            }
+            write_numeric_checked(
+                numeric_property,
+                value_ptr,
+                adjusted,
+                "table=" + narrow_unreal(table->GetFullName()) + ";row=" + row_name + ";setting=" + rule.key + ";field=" + field_name
+            );
             ++applied;
         }
         return {applied, missing};
+    }
+
+    std::pair<std::size_t, std::size_t> apply_nested_numeric_table_field(
+        RC::Unreal::UObject* table,
+        RC::Unreal::TMap<RC::Unreal::FName, unsigned char*>* row_map,
+        RC::Unreal::UScriptStruct* row_struct,
+        const NumericTableRule& rule,
+        const char* field_name,
+        double multiplier
+    ) {
+        if (!table || !row_map || !row_struct || !field_name) {
+            return {0, 1};
+        }
+
+        for (auto* container_property : row_struct->ForEachPropertyInChain()) {
+            auto* struct_property = container_property ? RC::Unreal::CastField<RC::Unreal::FStructProperty>(container_property) : nullptr;
+            RC::Unreal::UScriptStruct* inner_struct = struct_property ? struct_property->GetStruct() : nullptr;
+            if (!inner_struct) {
+                continue;
+            }
+
+            auto* nested_property_base = find_struct_property_by_name(inner_struct, field_name);
+            auto* nested_numeric = as_numeric_property(nested_property_base);
+            if (!nested_numeric) {
+                continue;
+            }
+
+            std::size_t applied = 0;
+            std::size_t missing = 0;
+            for (auto it = row_map->CreateIterator(); it; ++it) {
+                const auto row_name = narrow_unreal(it.Key().ToString());
+                if (!listed_row(row_name, rule.row_names) || excluded_row(row_name, {}, rule.exclude_suffixes)) {
+                    continue;
+                }
+                unsigned char* row = it.Value();
+                void* container_ptr = row ? container_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row)) : nullptr;
+                void* value_ptr = container_ptr ? nested_numeric->ContainerPtrToValuePtr<void>(container_ptr) : nullptr;
+                if (!value_ptr) {
+                    ++missing;
+                    continue;
+                }
+                const double current = read_numeric_value(nested_numeric, value_ptr);
+                const double baseline = numeric_baselines_.try_emplace(value_ptr, current).first->second;
+                const double adjusted = adjusted_numeric(baseline, multiplier, rule.mode, rule.result, rule.minimum);
+                write_numeric_checked(
+                    nested_numeric,
+                    value_ptr,
+                    adjusted,
+                    "table=" + narrow_unreal(table->GetFullName()) + ";row=" + row_name + ";setting=" + rule.key
+                        + ";field=" + narrow_unreal(container_property->GetName()) + "." + field_name
+                );
+                ++applied;
+            }
+            return {applied, missing};
+        }
+
+        return {0, 1};
     }
 
     std::pair<std::size_t, std::size_t> apply_array_numeric_field(
@@ -1792,16 +2118,15 @@ private:
                     ++missing;
                     continue;
                 }
-                const double current = numeric_property->IsFloatingPoint()
-                    ? numeric_property->GetFloatingPointPropertyValue(value_ptr)
-                    : static_cast<double>(numeric_property->GetSignedIntPropertyValue(value_ptr));
+                const double current = read_numeric_value(numeric_property, value_ptr);
                 const double baseline = numeric_baselines_.try_emplace(value_ptr, current).first->second;
                 const double adjusted = adjusted_numeric(baseline, multiplier, rule.mode, rule.result, rule.minimum);
-                if (numeric_property->IsFloatingPoint()) {
-                    numeric_property->SetFloatingPointPropertyValue(value_ptr, adjusted);
-                } else {
-                    numeric_property->SetIntPropertyValue(value_ptr, static_cast<int64_t>(std::llround(adjusted)));
-                }
+                write_numeric_checked(
+                    numeric_property,
+                    value_ptr,
+                    adjusted,
+                    "table=" + narrow_unreal(table->GetFullName()) + ";row=" + row_name + ";setting=" + rule.key + ";array=" + rule.array_field + ";index=" + std::to_string(index)
+                );
                 ++applied;
             }
         }
@@ -1845,6 +2170,7 @@ private:
         }
 
         if (applied == 0) {
+            log_target_property_export(table, rule.array_field, rule.key);
             append_log(
                 root_,
                 "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
@@ -1854,6 +2180,45 @@ private:
             );
         }
         return {applied, missing + (applied == 0 ? 1 : 0)};
+    }
+
+    void log_target_property_export(RC::Unreal::UObject* table, const char* property_name, const char* key) {
+        const auto rows = get_table_rows(table, "target_property_export");
+        if (!rows || !rows->row_struct || !property_name) {
+            return;
+        }
+        auto* property = find_struct_property_by_name(rows->row_struct, property_name);
+        if (!property) {
+            append_log(
+                root_,
+                "TARGET_DIAG Table=" + narrow_unreal(table->GetFullName())
+                    + " Key=" + (key ? std::string(key) : std::string("<unknown>"))
+                    + " Property=" + property_name
+                    + " Reason=property_missing"
+            );
+            return;
+        }
+
+        std::size_t logged = 0;
+        for (auto it = rows->row_map->CreateIterator(); it && logged < 4; ++it) {
+            unsigned char* row = it.Value();
+            if (!row) {
+                continue;
+            }
+            const auto row_name = narrow_unreal(it.Key().ToString());
+            void* value_ptr = property->ContainerPtrToValuePtr<void>(static_cast<void*>(row));
+            const auto exported = truncate_for_log(export_property_value_text(property, value_ptr));
+            append_log(
+                root_,
+                "TARGET_DIAG Table=" + narrow_unreal(table->GetFullName())
+                    + " Key=" + (key ? std::string(key) : std::string("<unknown>"))
+                    + " Row=" + row_name
+                    + " Property=" + property_name
+                    + " Class=" + property_class_name(property)
+                    + " Export=" + exported
+            );
+            ++logged;
+        }
     }
 
     std::pair<std::size_t, std::size_t> apply_token_numeric_property(
@@ -1868,6 +2233,77 @@ private:
     ) {
         if (!property || !value_ptr || depth > 8) {
             return {0, 1};
+        }
+
+        if (auto* map_property = RC::Unreal::CastField<RC::Unreal::FMapProperty>(property)) {
+            auto* key_property = map_property->GetKeyProp();
+            auto* value_property = map_property->GetValueProp();
+            auto* map = static_cast<RC::Unreal::FScriptMap*>(value_ptr);
+            if (!key_property || !value_property || !map) {
+                return {0, 1};
+            }
+
+            const auto layout = RC::Unreal::FScriptMap::GetScriptLayout(
+                key_property->GetSize(),
+                key_property->GetMinAlignment(),
+                value_property->GetSize(),
+                value_property->GetMinAlignment()
+            );
+
+            std::size_t applied = 0;
+            std::size_t missing = 0;
+            const int32_t max_index = map->GetMaxIndex();
+            for (int32_t index = 0; index < max_index; ++index) {
+                if (!map->IsValidIndex(index)) {
+                    continue;
+                }
+                auto* entry = static_cast<unsigned char*>(map->GetData(index, layout));
+                if (!entry) {
+                    ++missing;
+                    continue;
+                }
+
+                void* key_ptr = entry;
+                void* map_value_ptr = entry + layout.ValueOffset;
+                const auto key_export = export_property_value_text(key_property, key_ptr);
+                const auto value_export = export_property_value_text(value_property, map_value_ptr);
+
+                bool token_match = false;
+                for (const char* token : tokens) {
+                    if (contains_text(key_export, token) || contains_text(value_export, token)) {
+                        token_match = true;
+                        break;
+                    }
+                }
+                if (!token_match) {
+                    const auto child = apply_token_numeric_property(value_property, map_value_ptr, tokens, multiplier, mode, result, minimum, depth + 1);
+                    applied += child.first;
+                    missing += child.second;
+                    continue;
+                }
+
+                if (auto* numeric_property = as_numeric_property(value_property)) {
+                    const double current = read_numeric_value(numeric_property, map_value_ptr);
+                    const double baseline = numeric_baselines_.try_emplace(map_value_ptr, current).first->second;
+                    const double adjusted = adjusted_numeric(baseline, multiplier, mode, result, minimum);
+                    write_numeric_checked(
+                        numeric_property,
+                        map_value_ptr,
+                        adjusted,
+                        "token_map=" + narrow_unreal(property->GetFullName()) + ";key=" + truncate_for_log(key_export, 160)
+                    );
+                    ++applied;
+                    continue;
+                }
+
+                const auto child = apply_token_numeric_property(value_property, map_value_ptr, tokens, multiplier, mode, result, minimum, depth + 1);
+                applied += child.first;
+                missing += child.second;
+                if (child.first == 0) {
+                    ++missing;
+                }
+            }
+            return {applied, missing};
         }
 
         if (auto* array_property = RC::Unreal::CastField<RC::Unreal::FArrayProperty>(property)) {
@@ -1920,7 +2356,8 @@ private:
             }
             auto* array_property = RC::Unreal::CastField<RC::Unreal::FArrayProperty>(property);
             auto* struct_property = RC::Unreal::CastField<RC::Unreal::FStructProperty>(property);
-            if (!array_property && !struct_property) {
+            auto* map_property = RC::Unreal::CastField<RC::Unreal::FMapProperty>(property);
+            if (!array_property && !struct_property && !map_property) {
                 continue;
             }
             void* child_ptr = property->ContainerPtrToValuePtr<void>(container);
@@ -1940,6 +2377,10 @@ private:
             return {applied, missing};
         }
 
+        if (applied > 0) {
+            return {applied, 0};
+        }
+
         auto* numeric_property = find_named_numeric_property(row_struct, {"Amount", "Value", "ModifierValue", "FloatValue", "Multiplier", "BaseValue"});
         if (!numeric_property) {
             return {applied, missing + 1};
@@ -1949,16 +2390,10 @@ private:
         if (!numeric_ptr) {
             return {applied, missing + 1};
         }
-        const double current = numeric_property->IsFloatingPoint()
-            ? numeric_property->GetFloatingPointPropertyValue(numeric_ptr)
-            : static_cast<double>(numeric_property->GetSignedIntPropertyValue(numeric_ptr));
+        const double current = read_numeric_value(numeric_property, numeric_ptr);
         const double baseline = numeric_baselines_.try_emplace(numeric_ptr, current).first->second;
         const double adjusted = adjusted_numeric(baseline, multiplier, mode, result, minimum);
-        if (numeric_property->IsFloatingPoint()) {
-            numeric_property->SetFloatingPointPropertyValue(numeric_ptr, adjusted);
-        } else {
-            numeric_property->SetIntPropertyValue(numeric_ptr, static_cast<int64_t>(std::llround(adjusted)));
-        }
+        write_numeric_checked(numeric_property, numeric_ptr, adjusted, "token_struct=" + narrow_unreal(row_struct->GetFullName()));
         return {applied + 1, missing};
     }
 
@@ -1984,14 +2419,19 @@ private:
                     ++missing;
                     continue;
                 }
-                bool_property->SetPropertyValue(value_ptr, rule.value);
+                write_bool_checked(
+                    bool_property,
+                    value_ptr,
+                    rule.value,
+                    "table=" + narrow_unreal(table->GetFullName()) + ";setting=" + rule.key + ";field=" + field_name
+                );
                 ++applied;
             }
         }
         if (applied == 0) {
             append_log(root_, "FIELD_MISS Table=" + narrow_unreal(table->GetFullName()) + " Key=" + rule.key + " Reason=bool_field_not_found");
         }
-        return {applied, applied == 0 ? std::max<std::size_t>(missing, 1) : missing};
+        return {applied, applied == 0 ? std::max<std::size_t>(missing, 1) : 0};
     }
 
     std::pair<std::size_t, std::size_t> apply_mission_reward_rule(
@@ -2037,18 +2477,120 @@ private:
                     ++missing;
                     continue;
                 }
-                if (amount_property->IsFloatingPoint()) {
-                    amount_property->SetFloatingPointPropertyValue(value_ptr, amount);
-                } else {
-                    amount_property->SetIntPropertyValue(value_ptr, static_cast<int64_t>(std::llround(amount)));
-                }
+                write_numeric_checked(
+                    amount_property,
+                    value_ptr,
+                    amount,
+                    "table=" + narrow_unreal(table->GetFullName()) + ";row=" + row_name + ";setting=" + rule.key + ";currency=" + rule.currency_token
+                );
                 ++applied;
             }
+        }
+        if (applied == 0) {
+            const auto inserted = add_missing_mission_reward(table, rule, amount, array_property, inner_struct, amount_property);
+            applied += inserted.first;
+            missing += inserted.second;
         }
         if (applied == 0) {
             append_log(root_, "FIELD_MISS Table=" + narrow_unreal(table->GetFullName()) + " Key=" + rule.key + " Reason=mission_reward_row_or_currency_not_found");
         }
         return {applied, missing + (applied == 0 ? 1 : 0)};
+    }
+
+    std::pair<std::size_t, std::size_t> add_missing_mission_reward(
+        RC::Unreal::UObject* table,
+        const MissionRewardRule& rule,
+        double amount,
+        RC::Unreal::FArrayProperty* array_property,
+        RC::Unreal::UScriptStruct* inner_struct,
+        RC::Unreal::FNumericProperty* amount_property
+    ) {
+        const auto rows = get_table_rows(table, "mission_reward_insert");
+        if (!rows || !array_property || !inner_struct || !amount_property) {
+            return {0, 1};
+        }
+
+        auto* meta_property_base = find_struct_property_by_name(inner_struct, "Meta");
+        auto* meta_property = meta_property_base ? RC::Unreal::CastField<RC::Unreal::FStructProperty>(meta_property_base) : nullptr;
+        RC::Unreal::UScriptStruct* meta_struct = meta_property ? meta_property->GetStruct() : nullptr;
+        auto* row_name_property_base = meta_struct ? find_struct_property_by_name(meta_struct, "RowName") : nullptr;
+        auto* row_name_property = row_name_property_base ? RC::Unreal::CastField<RC::Unreal::FNameProperty>(row_name_property_base) : nullptr;
+        if (!meta_property || !meta_struct || !row_name_property) {
+            append_log(root_, "FIELD_MISS Table=" + narrow_unreal(table->GetFullName()) + " Key=" + rule.key + " Reason=mission_reward_meta_rowname_missing");
+            return {0, 1};
+        }
+
+        for (auto it = rows->row_map->CreateIterator(); it; ++it) {
+            const auto row_name = narrow_unreal(it.Key().ToString());
+            if (row_name != rule.row_name) {
+                continue;
+            }
+            unsigned char* row = it.Value();
+            void* array_ptr = row ? array_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row)) : nullptr;
+            auto* array = array_ptr ? static_cast<RC::Unreal::FScriptArray*>(array_ptr) : nullptr;
+            if (!array || array->Num() <= 0) {
+                return {0, 1};
+            }
+
+            auto* inner_property = array_property->GetInner();
+            const int32_t element_size = inner_property->GetElementSize();
+            const uint32_t element_alignment = inner_property->GetMinAlignment();
+            auto* template_element = static_cast<unsigned char*>(array->GetData());
+            const int32_t new_index = array->Add(1, element_size, element_alignment);
+            auto* new_element = static_cast<unsigned char*>(array->GetData()) + (new_index * element_size);
+            if (!new_element || !template_element) {
+                return {0, 1};
+            }
+            inner_property->InitializeValue(new_element);
+            inner_property->CopyCompleteValue(new_element, template_element);
+
+            void* meta_ptr = meta_property->ContainerPtrToValuePtr<void>(static_cast<void*>(new_element));
+            void* row_name_ptr = meta_ptr ? row_name_property->ContainerPtrToValuePtr<void>(meta_ptr) : nullptr;
+            if (!row_name_ptr) {
+                return {0, 1};
+            }
+            const auto currency_name = wide_from_ascii(rule.currency_token);
+            row_name_property->SetPropertyValue(row_name_ptr, RC::Unreal::FName(currency_name.c_str()));
+
+            void* amount_ptr = amount_property->ContainerPtrToValuePtr<void>(static_cast<void*>(new_element));
+            if (!amount_ptr) {
+                return {0, 1};
+            }
+            write_numeric_checked(
+                amount_property,
+                amount_ptr,
+                amount,
+                "table=" + narrow_unreal(table->GetFullName()) + ";row=" + row_name + ";setting=" + rule.key + ";insertedCurrency=" + rule.currency_token
+            );
+
+            const auto exported = export_property_value_text(array_property, array_ptr);
+            const bool currency_present = contains_text(exported, rule.currency_token);
+            ++mutation_math_checks_;
+            if (!currency_present) {
+                ++mutation_math_failures_;
+                append_log(
+                    root_,
+                    "MATH_CHECK_FAIL Context=mission_reward_insert"
+                        " Table=" + narrow_unreal(table->GetFullName())
+                        + " Key=" + rule.key
+                        + " ExpectedCurrency=" + rule.currency_token
+                        + " Export=" + truncate_for_log(exported, 500)
+                );
+                return {0, 1};
+            }
+            append_log(
+                root_,
+                "MISSION_REWARD_INSERT Table=" + narrow_unreal(table->GetFullName())
+                    + " Row=" + row_name
+                    + " Key=" + rule.key
+                    + " Currency=" + rule.currency_token
+                    + " Amount=" + std::to_string(amount)
+                    + " Index=" + std::to_string(new_index)
+            );
+            return {1, 0};
+        }
+
+        return {0, 1};
     }
 
     std::pair<std::size_t, std::size_t> apply_lucky_strike_rule(RC::Unreal::UObject* table, double multiplier) {
@@ -2098,6 +2640,7 @@ private:
             }
         }
         if (applied == 0) {
+            log_lucky_strike_target_export(table);
             append_log(
                 root_,
                 "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
@@ -2105,13 +2648,51 @@ private:
                     + " CandidateRows=" + std::to_string(candidate_rows)
             );
         }
-        return {applied, missing + (applied == 0 ? 1 : 0)};
+        return {applied, applied > 0 ? 0 : missing + 1};
+    }
+
+    void log_lucky_strike_target_export(RC::Unreal::UObject* table) {
+        const auto rows = get_table_rows(table, "lucky_strike_target_export");
+        if (!rows || !rows->row_struct) {
+            return;
+        }
+        for (auto it = rows->row_map->CreateIterator(); it; ++it) {
+            const auto row_name = narrow_unreal(it.Key().ToString());
+            if (row_name != "Resources_Voxel_Instant" && !contains_text(row_name, "Voxel_Instant")) {
+                continue;
+            }
+            unsigned char* row = it.Value();
+            if (!row) {
+                continue;
+            }
+            for (auto* property : rows->row_struct->ForEachPropertyInChain()) {
+                if (!property) {
+                    continue;
+                }
+                const auto property_name = narrow_unreal(property->GetName());
+                if (property_name != "Rewards" && property_name != "ExtraData" && property_name != "DisplayName") {
+                    continue;
+                }
+                void* value_ptr = property->ContainerPtrToValuePtr<void>(static_cast<void*>(row));
+                const auto exported = truncate_for_log(export_property_value_text(property, value_ptr));
+                append_log(
+                    root_,
+                    "TARGET_DIAG Table=" + narrow_unreal(table->GetFullName())
+                        + " Key=lucky_strike_chance"
+                        + " Row=" + row_name
+                        + " Property=" + property_name
+                        + " Class=" + property_class_name(property)
+                        + " Export=" + exported
+                );
+            }
+        }
     }
 
     std::pair<std::size_t, std::size_t> apply_array_range_group(
         RC::Unreal::UObject* table,
         const ArrayRangeGroupRule& rule,
-        const IniConfig& config
+        const IniConfig& config,
+        const DebugValidationConfig& debug
     ) {
         if (!array_range_group_mutation_enabled(rule)) {
             append_log(root_, "SAFETY_SKIP ArrayRangeHelperDisabled KeyPrefix=" + std::string(rule.key_prefix));
@@ -2170,16 +2751,14 @@ private:
                     ++missing;
                     continue;
                 }
-                const double current = numeric_property->IsFloatingPoint()
-                    ? numeric_property->GetFloatingPointPropertyValue(value_ptr)
-                    : static_cast<double>(numeric_property->GetSignedIntPropertyValue(value_ptr));
+                const double current = read_numeric_value(numeric_property, value_ptr);
                 const double baseline = numeric_baselines_.try_emplace(value_ptr, current).first->second;
                 int range_index = 1;
                 double multiplier = 1.0;
                 bool matched_range = false;
                 for (const auto& [minimum, maximum] : rule.ranges) {
                     if (baseline >= minimum && baseline <= maximum) {
-                        multiplier = config.get_number("native_groups", std::string(rule.key_prefix) + std::to_string(range_index), 1.0);
+                        multiplier = debug_multiplier(config.get_number("native_groups", std::string(rule.key_prefix) + std::to_string(range_index), 1.0), debug);
                         matched_range = true;
                         break;
                     }
@@ -2189,11 +2768,12 @@ private:
                     continue;
                 }
                 const double adjusted = adjusted_numeric(baseline, multiplier, NumericMode::Multiply, NumericResult::Nearest, rule.minimum);
-                if (numeric_property->IsFloatingPoint()) {
-                    numeric_property->SetFloatingPointPropertyValue(value_ptr, adjusted);
-                } else {
-                    numeric_property->SetIntPropertyValue(value_ptr, static_cast<int64_t>(std::llround(adjusted)));
-                }
+                write_numeric_checked(
+                    numeric_property,
+                    value_ptr,
+                    adjusted,
+                    "table=" + narrow_unreal(table->GetFullName()) + ";row=" + row_name + ";range=" + rule.key_prefix + std::to_string(range_index) + ";array=" + rule.array_field
+                );
                 ++applied;
             }
         }
@@ -2226,6 +2806,19 @@ private:
             if (array && array->Num() > 0) {
                 const auto* inner = array_property->GetInner();
                 array->Empty(0, inner->GetElementSize(), inner->GetMinAlignment());
+                ++mutation_math_checks_;
+                if (array->Num() != 0) {
+                    ++mutation_math_failures_;
+                    if (mutation_math_logs_ < 80) {
+                        ++mutation_math_logs_;
+                        append_log(
+                            root_,
+                            "MATH_CHECK_FAIL Context=clear_array;table=" + narrow_unreal(table->GetFullName())
+                                + ";field=" + array_field
+                                + " Expected=0 Actual=" + std::to_string(array->Num())
+                        );
+                    }
+                }
                 ++cleared;
             }
         }
@@ -2235,7 +2828,8 @@ private:
     std::pair<std::size_t, std::size_t> apply_range_group(
         RC::Unreal::UObject* table,
         const RangeGroupRule& rule,
-        const IniConfig& config
+        const IniConfig& config,
+        const DebugValidationConfig& debug
     ) {
         const auto rows = get_table_rows(table, "range_group");
         if (!rows) {
@@ -2274,16 +2868,14 @@ private:
                 ++missing;
                 continue;
             }
-            const double current = numeric_property->IsFloatingPoint()
-                ? numeric_property->GetFloatingPointPropertyValue(value_ptr)
-                : static_cast<double>(numeric_property->GetSignedIntPropertyValue(value_ptr));
+            const double current = read_numeric_value(numeric_property, value_ptr);
             const double baseline = numeric_baselines_.try_emplace(value_ptr, current).first->second;
             int range_index = 1;
             double multiplier = 1.0;
             bool matched_range = false;
             for (const auto& [minimum, maximum] : rule.ranges) {
                 if (baseline >= minimum && baseline <= maximum) {
-                    multiplier = config.get_number("native_groups", std::string(rule.key_prefix) + std::to_string(range_index), 1.0);
+                    multiplier = debug_multiplier(config.get_number("native_groups", std::string(rule.key_prefix) + std::to_string(range_index), 1.0), debug);
                     matched_range = true;
                     break;
                 }
@@ -2293,11 +2885,12 @@ private:
                 continue;
             }
             const double adjusted = adjusted_numeric(baseline, multiplier, NumericMode::Multiply, NumericResult::Nearest, rule.minimum);
-            if (numeric_property->IsFloatingPoint()) {
-                numeric_property->SetFloatingPointPropertyValue(value_ptr, adjusted);
-            } else {
-                numeric_property->SetIntPropertyValue(value_ptr, static_cast<int64_t>(std::llround(adjusted)));
-            }
+            write_numeric_checked(
+                numeric_property,
+                value_ptr,
+                adjusted,
+                "table=" + narrow_unreal(table->GetFullName()) + ";row=" + row_name + ";range=" + rule.key_prefix + std::to_string(range_index) + ";field=" + rule.field
+            );
             ++applied;
         }
         return {applied, missing};
@@ -2317,6 +2910,10 @@ private:
     std::unordered_map<RC::Unreal::UObject*, float> air_control_baselines_;
     std::unordered_map<void*, double> numeric_baselines_;
     std::unordered_map<void*, double> curve_key_baselines_;
+    std::size_t mutation_math_checks_{0};
+    std::size_t mutation_math_failures_{0};
+    std::size_t mutation_math_logs_{0};
+    bool mutation_debug_log_each_{false};
 };
 }
 
