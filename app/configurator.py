@@ -23,7 +23,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "Icarus Balance Configurator"
-APP_VERSION = "0.1.3-beta"
+APP_VERSION = "0.1.4-beta"
 UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 RUNTIME_MOD_FOLDER = "Configuration_Mod"
 RUNTIME_INI_NAME = "settings.ini"
@@ -1600,6 +1600,74 @@ class Configurator(tk.Tk):
                     return entry.get("Value", 1)
         return 1
 
+    def item_slot_index(self, item: dict[str, Any]) -> int | None:
+        for key in ("Location", "Slot", "SlotIndex", "InventorySlot", "ItemSlot"):
+            value = item.get(key)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+                return int(value.strip())
+            if isinstance(value, dict):
+                nested = value.get("Value")
+                if isinstance(nested, int) and not isinstance(nested, bool):
+                    return nested
+                if isinstance(nested, str) and nested.strip().lstrip("-").isdigit():
+                    return int(nested.strip())
+        return None
+
+    def inventory_slot_capacity(self, inventory: dict[str, Any]) -> int | None:
+        for key in ("MaxSlots", "SlotCount", "StartingSlots", "NumberOfSlots", "NumSlots", "InventorySize", "Capacity"):
+            value = inventory.get(key)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, int) and value >= 0:
+                return value
+            if isinstance(value, str) and value.strip().isdigit():
+                return int(value.strip())
+        slots = inventory.get("Slots")
+        if isinstance(slots, list):
+            return len(slots)
+        return None
+
+    def inventory_open_slot_count(self, inventory: dict[str, Any]) -> int | None:
+        capacity = self.inventory_slot_capacity(inventory)
+        if capacity is None:
+            return None
+        items = inventory.get("Items", [])
+        if not isinstance(items, list):
+            raise RuntimeError("Target inventory Items field is not a list")
+        occupied_slots: set[int] = set()
+        explicit_slot_items = 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            slot = self.item_slot_index(item)
+            if slot is None:
+                continue
+            explicit_slot_items += 1
+            if slot < 0 or slot >= capacity:
+                raise RuntimeError(f"Target inventory already has an item in invalid slot {slot}; capacity is {capacity}.")
+            if slot in occupied_slots:
+                raise RuntimeError(f"Target inventory already has two items assigned to slot {slot}.")
+            occupied_slots.add(slot)
+        if explicit_slot_items:
+            used = len(occupied_slots)
+        else:
+            used = len([item for item in items if isinstance(item, dict)])
+        if used > capacity:
+            raise RuntimeError(f"Target inventory already has {used} items but only {capacity} slots.")
+        return capacity - used
+
+    def require_inventory_slots_available(self, inventory: dict[str, Any], needed: int, label: str) -> str:
+        open_slots = self.inventory_open_slot_count(inventory)
+        if open_slots is None:
+            return "append-only JSON inventory; no fixed slot cap found"
+        if open_slots < needed:
+            raise RuntimeError(f"{label} does not have enough open slots. Needed {needed}, available {open_slots}. No item was moved.")
+        return f"{open_slots} open slot(s) before restore"
+
     def reset_item_guid(self, item: dict[str, Any]) -> dict[str, Any]:
         cloned = json.loads(json.dumps(item))
         if isinstance(cloned, dict) and "DatabaseGUID" in cloned:
@@ -1647,13 +1715,25 @@ class Configurator(tk.Tk):
 
     def scan_meta_inventory_sources(self, steam_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         sources: list[dict[str, Any]] = []
+        meta_path = steam_dir / "MetaInventory.json"
+        inventory = self.read_json_file(meta_path, {"InventoryID": "MetaInventoryID_Main", "Items": []})
+        slot_note = "slot cap unknown"
+        if isinstance(inventory, dict):
+            try:
+                open_slots = self.inventory_open_slot_count(inventory)
+                if open_slots is None:
+                    slot_note = "append-only"
+                else:
+                    capacity = self.inventory_slot_capacity(inventory)
+                    slot_note = f"{open_slots}/{capacity} slots open"
+            except Exception:
+                slot_note = "slot safety needs attention"
         target = {
-            "label": f"{steam_dir.name} - MetaInventory",
+            "label": f"{steam_dir.name} - MetaInventory ({slot_note})",
             "steam_id": steam_dir.name,
             "kind": "meta_inventory",
-            "path": str(steam_dir / "MetaInventory.json"),
+            "path": str(meta_path),
         }
-        inventory = self.read_json_file(steam_dir / "MetaInventory.json", {"InventoryID": "MetaInventoryID_Main", "Items": []})
         items = inventory.get("Items", []) if isinstance(inventory, dict) else []
         if isinstance(items, list):
             for index, item in enumerate(items):
@@ -2002,12 +2082,15 @@ class Configurator(tk.Tk):
         data.setdefault("Items", [])
         if not isinstance(data["Items"], list):
             raise RuntimeError(f"Target inventory Items field is not a list: {path}")
+        slot_status = self.require_inventory_slots_available(data, 1, str(target.get("label") or path))
         data["Items"].append(self.reset_item_guid(item))
         self.write_json_file(path, data)
         verify = self.read_json_file(path, {})
         verify_items = verify.get("Items", []) if isinstance(verify, dict) else []
         if not isinstance(verify_items, list) or not verify_items:
             raise RuntimeError("Target inventory verification failed after write")
+        self.require_inventory_slots_available(verify, 0, str(target.get("label") or path))
+        self.log(f"Transfer vault slot safety passed for {target.get('label', path)}: {slot_status}")
 
     def vault_import_selected(self) -> None:
         lock = None

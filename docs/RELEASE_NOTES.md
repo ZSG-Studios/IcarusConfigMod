@@ -1,5 +1,17 @@
 # Release Notes
 
+## v0.1.4-beta - Transfer Vault Slot Safety
+
+This update adds hard preflight checks before Transfer Vault restore writes.
+
+### Fixed
+
+- Transfer Vault restore now checks known target inventory capacity before writing.
+- Restore refuses to continue if the target has fewer open slots than the item restore needs.
+- Restore refuses inventories that already contain duplicate explicit slot assignments.
+- Restore refuses inventories that already contain out-of-range explicit slot assignments.
+- MetaInventory saves with no fixed slot cap are treated as append-only JSON inventories, so the app does not invent fake slot limits.
+
 ## v0.1.3-beta - Transfer Vault Item Viewer
 
 This update improves the Transfer Vault scanner so players can see item names stored inside live prospect inventory data.

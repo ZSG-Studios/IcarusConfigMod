@@ -82,7 +82,7 @@ Use `--debug-risky-arrays` only when intentionally testing free-craft style arra
 
 See [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) for the latest beta fix notes.
 
-Recent runtime fixes in `v0.1.3-beta`:
+Recent runtime fixes in `v0.1.4-beta`:
 
 - Skinning yield now increases carcass recipe output counts instead of touching `D_ToolDamage.Skinning_Efficiency`, which could make carcasses deplete too quickly.
 - Baseline `0` values now remain `0` during multiplier math, preventing disabled/sentinel timers from becoming one-second timers.
@@ -90,6 +90,7 @@ Recent runtime fixes in `v0.1.3-beta`:
 - Generic recipe/material/free-craft array edits skip carcass processor rows.
 - Stack and container slot runtime mutation is clamped so it cannot shrink below the vanilla baseline.
 - Transfer Vault now decodes and lists live prospect inventory item row names read-only, including items stored in compressed prospect/container inventory data.
+- Transfer Vault restore now performs slot safety checks before writing: no overwrite, no duplicate explicit slots, no out-of-range slots, and no restore when known capacity has no open slot.
 
 Some settings are table-backed rather than direct live-player writes. Health, stamina, carry capacity, movement speed, and regen mutate `D_CharacterStartingStats` grants, so the game may recalculate visible values only after session load, spawn, respawn, healing, or other stat refresh behavior. Air control is applied directly to loaded movement components and should be more immediately visible.
 
@@ -118,6 +119,7 @@ The `Transfer Vault` tab is an offline shared stash for local players and worlds
 - Writes a transaction ledger to `transfer_vault\ledger.jsonl`.
 - Creates a full save backup before every vault export/import.
 - Refuses to run item moves while Icarus is open.
+- Checks known target slot capacity before restore and refuses to write if no open slot is available.
 
 Current beta support is intentionally conservative: JSON-backed meta/loadout items can be moved; live backpack/hotbar/container items inside the prospect binary blob are listed read-only until the Unreal property writer is fully validated.
 
