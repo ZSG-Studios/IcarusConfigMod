@@ -56,6 +56,8 @@ The player zip should not include:
 - First app load shows `Vanilla Defaults`.
 - Dropdown also shows `Premade_Configuration`.
 - Dropdown entries do not show `.json`.
+- Transfer Vault tab scans local player folders without moving items.
+- Transfer Vault zip/release docs clearly state that prospect binary blob inventories are scan-only until the writer is validated.
 - Clicking install while vanilla is selected shows a clean message instead of a traceback.
 - If Icarus is not found automatically, clicking install prompts for the Icarus folder or `Icarus\Binaries\Win64`.
 - Imported or saved profiles are copied into `profiles/` and appear in the dropdown.

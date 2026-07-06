@@ -1,8 +1,16 @@
 # Release Notes
 
-## v0.1.1-beta - Runtime Fix Update
+## v0.1.2-beta - Transfer Vault Beta
 
 This update focuses on runtime safety, validation accuracy, and release packaging cleanup.
+
+### Added
+
+- Added a `Transfer Vault` tab for an offline shared stash across local Icarus player folders.
+- Added vault scanning for local SteamID folders, JSON-backed inventories, loadout meta items, active prospects, and prospect members.
+- Added exclusive `vault.lock` protection and a transaction ledger at `transfer_vault/ledger.jsonl`.
+- Vault export/import creates full save backups first and refuses to move items while Icarus is running.
+- Live prospect inventory blobs are detected and reported with item/inventory marker counts.
 
 ### Fixed
 
@@ -31,3 +39,7 @@ This update focuses on runtime safety, validation accuracy, and release packagin
 - Players do not need Python, PowerShell scripts, batch files, Visual Studio, CMake, Rust, Nuitka, or PyInstaller.
 - Runtime state, logs, generated work files, and save backups are stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\`.
 - The player zip should not include source tools, build folders, `.bat`, `.ps1`, or player-side `.py` launch scripts.
+
+### Transfer Vault Limit
+
+Current beta support moves verified JSON-backed meta/loadout items. Live backpack, hotbar, belt, equipment, mount cargo, and world container items inside `ProspectBlob.BinaryBlob` are scan-only until the Unreal property writer is validated.

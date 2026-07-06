@@ -17,6 +17,7 @@ This mod is built for configurable balance testing. It can adjust progression, r
 [*]Lets players create, save, import, and reuse custom profiles.[/*]
 [*]Creates an automatic player/world save backup before applying configuration changes.[/*]
 [*]Includes a Save Backups tab for manual backup, restore, refresh, and opening the backup folder.[/*]
+[*]Includes a Transfer Vault tab for scanning local players/worlds and moving verified JSON-backed items through a shared offline stash.[/*]
 [*]Writes selected settings into a unified runtime config.[/*]
 [*]Applies supported settings in-game through the DLL backend.[/*]
 [*]Writes validation logs so players can confirm active settings applied.[/*]
@@ -75,7 +76,7 @@ If [b]GreenLight=NO[/b], check nearby [b]SETTING_STATUS[/b] lines to see which a
 
 [heading]Current Beta Notes[/heading]
 [list]
-[*]This [b]v0.1.1-beta[/b] build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, and zero-value timer math.[/*]
+[*]This [b]v0.1.2-beta[/b] build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, zero-value timer math, and the first Transfer Vault beta.[/*]
 [*]Skinning yield now increases carcass output counts instead of changing [b]D_ToolDamage.Skinning_Efficiency[/b], which could make carcasses deplete too quickly.[/*]
 [*]Baseline 0 values now stay 0 during multiplier math, preventing disabled or sentinel timers from becoming one-second timers.[/*]
 [*]Free craft no longer clears [b]ResourceInputs[/b], avoiding live resource drain behavior.[/*]
@@ -107,6 +108,19 @@ When present, backups include:
 [/list]
 
 Every apply creates a [b]before_apply[/b] backup first. Restoring a backup creates a [b]pre_restore[/b] backup before replacing matching save components. Close Icarus before creating or restoring backups so the app does not copy or replace live save files.
+
+[heading]Transfer Vault[/heading]
+The [b]Transfer Vault[/b] tab scans local Icarus player folders and prospect files. It can move verified JSON-backed items, such as meta inventory/loadout items, into a shared offline stash under [b]%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\transfer_vault[/b].
+
+[list]
+[*]Creates a full save backup before vault export/import.[/*]
+[*]Uses a [b]vault.lock[/b] file so two vault operations cannot run at the same time.[/*]
+[*]Writes a transaction ledger to [b]transfer_vault\ledger.jsonl[/b].[/*]
+[*]Refuses item moves while Icarus is open.[/*]
+[*]Detects active prospect members and compressed live-world inventory blobs.[/*]
+[/list]
+
+[b]Beta limit:[/b] live backpack, hotbar, belt, equipment, mount cargo, and world container items inside [b]ProspectBlob.BinaryBlob[/b] are scan-only until the Unreal property writer is fully validated.
 
 [heading]Installation Instructions[/heading]
 [list=1]

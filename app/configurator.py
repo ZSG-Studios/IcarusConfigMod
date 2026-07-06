@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import filecmp
+import base64
 import os
 import re
 import shutil
@@ -10,17 +11,19 @@ import sys
 import traceback
 import urllib.request
 import zipfile
+import zlib
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable
+from uuid import uuid4
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "Icarus Balance Configurator"
-APP_VERSION = "0.1.1-beta"
+APP_VERSION = "0.1.2-beta"
 UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 RUNTIME_MOD_FOLDER = "Configuration_Mod"
 RUNTIME_INI_NAME = "settings.ini"
@@ -670,6 +673,17 @@ class Configurator(tk.Tk):
         self.save_backup_listbox: tk.Listbox | None = None
         self.save_backup_entries: list[Path] = []
         self.save_backup_summary_var = tk.StringVar(value="No save backups loaded")
+        self.vault_dir = self.state_dir / "transfer_vault"
+        self.vault_path = self.vault_dir / "vault.json"
+        self.vault_ledger_path = self.vault_dir / "ledger.jsonl"
+        self.vault_listbox: tk.Listbox | None = None
+        self.vault_source_listbox: tk.Listbox | None = None
+        self.vault_target_combo: ttk.Combobox | None = None
+        self.vault_summary_var = tk.StringVar(value="Transfer vault not scanned")
+        self.vault_sources: list[dict[str, Any]] = []
+        self.vault_items: list[dict[str, Any]] = []
+        self.vault_targets: list[dict[str, Any]] = []
+        self.vault_target_var = tk.StringVar(value="")
 
         self.build_ui()
         self.refresh_profile_choices()
@@ -772,6 +786,7 @@ class Configurator(tk.Tk):
             category_rows[category] = 0
 
         self.add_save_backup_tab(notebook)
+        self.add_transfer_vault_tab(notebook)
 
         console_outer = ttk.Frame(notebook, padding=10, style="App.TFrame")
         notebook.add(console_outer, text="Console")
@@ -921,6 +936,74 @@ class Configurator(tk.Tk):
             wraplength=920,
         ).pack(anchor=tk.W, pady=(8, 0))
         self.refresh_save_backup_list()
+
+    def add_transfer_vault_tab(self, notebook: ttk.Notebook) -> None:
+        outer = ttk.Frame(notebook, padding=10, style="App.TFrame")
+        notebook.add(outer, text="Transfer Vault")
+
+        actions = ttk.Frame(outer, style="App.TFrame")
+        actions.pack(fill=tk.X, pady=(0, 8))
+        ttk.Button(actions, text="Scan Saves", style="Primary.TButton", command=self.refresh_transfer_vault).pack(side=tk.LEFT)
+        ttk.Button(actions, text="Move Selected To Vault", style="Soft.TButton", command=self.vault_export_selected).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(actions, text="Restore Vault Item", style="Soft.TButton", command=self.vault_import_selected).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(actions, text="Open Vault Folder", style="Soft.TButton", command=self.open_transfer_vault_folder).pack(side=tk.LEFT, padx=(6, 0))
+
+        ttk.Label(outer, textvariable=self.vault_summary_var, style="Hud.TLabel").pack(anchor=tk.W, pady=(0, 8))
+        ttk.Label(
+            outer,
+            text="Offline shared stash for all local players. Close Icarus first. JSON inventories can be moved now; live world inventories inside ProspectBlob are detected but not edited until the binary inventory writer is verified.",
+            style="CardText.TLabel",
+            wraplength=980,
+        ).pack(anchor=tk.W, pady=(0, 8))
+
+        selector = ttk.Frame(outer, style="App.TFrame")
+        selector.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(selector, text="Restore target:", style="Hud.TLabel").pack(side=tk.LEFT)
+        self.vault_target_combo = ttk.Combobox(selector, textvariable=self.vault_target_var, state="readonly", width=72, style="Profile.TCombobox")
+        self.vault_target_combo.pack(side=tk.LEFT, padx=(6, 0), fill=tk.X, expand=True)
+
+        columns = ttk.Frame(outer, style="App.TFrame")
+        columns.pack(fill=tk.BOTH, expand=True)
+
+        left = ttk.LabelFrame(columns, text="Detected Player/World Items", style="Card.TLabelframe", padding=8)
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
+        self.vault_source_listbox = tk.Listbox(
+            left,
+            height=18,
+            background="#050a0d",
+            foreground=UI_TEXT,
+            selectbackground=UI_TEAL_DARK,
+            selectforeground=UI_TEXT,
+            relief=tk.FLAT,
+            borderwidth=0,
+            activestyle="none",
+            font=("Consolas", 9),
+        )
+        source_scroll = ttk.Scrollbar(left, orient=tk.VERTICAL, command=self.vault_source_listbox.yview)
+        self.vault_source_listbox.configure(yscrollcommand=source_scroll.set)
+        self.vault_source_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        source_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        right = ttk.LabelFrame(columns, text="Shared Transfer Vault", style="Card.TLabelframe", padding=8)
+        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
+        self.vault_listbox = tk.Listbox(
+            right,
+            height=18,
+            background="#050a0d",
+            foreground=UI_TEXT,
+            selectbackground=UI_TEAL_DARK,
+            selectforeground=UI_TEXT,
+            relief=tk.FLAT,
+            borderwidth=0,
+            activestyle="none",
+            font=("Consolas", 9),
+        )
+        vault_scroll = ttk.Scrollbar(right, orient=tk.VERTICAL, command=self.vault_listbox.yview)
+        self.vault_listbox.configure(yscrollcommand=vault_scroll.set)
+        self.vault_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vault_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.refresh_transfer_vault()
 
     def add_group_card(self, parent: ttk.Frame, rows: dict[str, int], group: NativeGroupSpec) -> None:
         row = rows[group.category]
@@ -1488,6 +1571,379 @@ class Configurator(tk.Tk):
             os.startfile(self.save_backups_dir)
         except Exception as error:
             self.show_error("Open save backup folder failed", error)
+
+    def player_data_root(self) -> Path:
+        return self.icarus_saved_dir() / "PlayerData"
+
+    def read_json_file(self, path: Path, fallback: Any = None) -> Any:
+        if not path.is_file():
+            return fallback
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+
+    def write_json_file(self, path: Path, data: Any) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=4) + "\n", encoding="utf-8")
+
+    def item_row_name(self, item: dict[str, Any]) -> str:
+        static = item.get("ItemStaticData", {})
+        if isinstance(static, dict):
+            row = static.get("RowName")
+            if row:
+                return str(row)
+        return str(item.get("RowName") or item.get("Name") or "UnknownItem")
+
+    def item_stack_value(self, item: dict[str, Any]) -> Any:
+        dynamic = item.get("ItemDynamicData", [])
+        if isinstance(dynamic, list):
+            for entry in dynamic:
+                if isinstance(entry, dict) and entry.get("PropertyType") in {"ItemableStack", "Stack", "StackCount"}:
+                    return entry.get("Value", 1)
+        return 1
+
+    def reset_item_guid(self, item: dict[str, Any]) -> dict[str, Any]:
+        cloned = json.loads(json.dumps(item))
+        if isinstance(cloned, dict) and "DatabaseGUID" in cloned:
+            cloned["DatabaseGUID"] = uuid4().hex.upper()
+        return cloned
+
+    def load_vault(self) -> dict[str, Any]:
+        if not self.vault_path.is_file():
+            return {"schema": 1, "items": []}
+        data = self.read_json_file(self.vault_path, {"schema": 1, "items": []})
+        if not isinstance(data, dict):
+            return {"schema": 1, "items": []}
+        data.setdefault("schema", 1)
+        data.setdefault("items", [])
+        if not isinstance(data["items"], list):
+            data["items"] = []
+        return data
+
+    def save_vault(self, data: dict[str, Any]) -> None:
+        data["updated"] = datetime.now().isoformat(timespec="seconds")
+        self.write_json_file(self.vault_path, data)
+
+    def append_vault_ledger(self, event: dict[str, Any]) -> None:
+        self.vault_dir.mkdir(parents=True, exist_ok=True)
+        event = {"time": datetime.now().isoformat(timespec="seconds"), **event}
+        with self.vault_ledger_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, sort_keys=True) + "\n")
+
+    def acquire_vault_lock(self) -> Any:
+        self.vault_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = self.vault_dir / "vault.lock"
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError as error:
+            raise RuntimeError(f"Transfer vault is locked by another operation: {lock_path}") from error
+        os.write(fd, f"{os.getpid()} {datetime.now().isoformat(timespec='seconds')}\n".encode("utf-8"))
+        return fd, lock_path
+
+    def release_vault_lock(self, lock: Any) -> None:
+        fd, lock_path = lock
+        try:
+            os.close(fd)
+        finally:
+            Path(lock_path).unlink(missing_ok=True)
+
+    def scan_meta_inventory_sources(self, steam_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        sources: list[dict[str, Any]] = []
+        target = {
+            "label": f"{steam_dir.name} - MetaInventory",
+            "steam_id": steam_dir.name,
+            "kind": "meta_inventory",
+            "path": str(steam_dir / "MetaInventory.json"),
+        }
+        inventory = self.read_json_file(steam_dir / "MetaInventory.json", {"InventoryID": "MetaInventoryID_Main", "Items": []})
+        items = inventory.get("Items", []) if isinstance(inventory, dict) else []
+        if isinstance(items, list):
+            for index, item in enumerate(items):
+                if isinstance(item, dict):
+                    sources.append(
+                        {
+                            "transferable": True,
+                            "kind": "meta_inventory",
+                            "path": str(steam_dir / "MetaInventory.json"),
+                            "steam_id": steam_dir.name,
+                            "index": index,
+                            "item": item,
+                            "label": f"{steam_dir.name} | MetaInventory | {self.item_row_name(item)} x{self.item_stack_value(item)}",
+                        }
+                    )
+        return sources, target
+
+    def scan_loadout_sources(self, steam_dir: Path) -> list[dict[str, Any]]:
+        sources: list[dict[str, Any]] = []
+        path = steam_dir / "Loadout" / "Loadouts.json"
+        data = self.read_json_file(path, {})
+        loadouts = data.get("Loadouts", []) if isinstance(data, dict) else []
+        if not isinstance(loadouts, list):
+            return sources
+        for loadout_index, loadout in enumerate(loadouts):
+            if not isinstance(loadout, dict):
+                continue
+            items = loadout.get("MetaItems", [])
+            if not isinstance(items, list):
+                continue
+            for item_index, item in enumerate(items):
+                if isinstance(item, dict):
+                    sources.append(
+                        {
+                            "transferable": True,
+                            "kind": "loadout_meta_item",
+                            "path": str(path),
+                            "steam_id": steam_dir.name,
+                            "loadout_index": loadout_index,
+                            "index": item_index,
+                            "item": item,
+                            "label": f"{steam_dir.name} | Loadout {loadout_index} | {self.item_row_name(item)} x{self.item_stack_value(item)}",
+                        }
+                    )
+        return sources
+
+    def prospect_blob_summary(self, prospect_path: Path) -> tuple[bool, int, int]:
+        try:
+            data = self.read_json_file(prospect_path, {})
+            blob = data.get("ProspectBlob", {}).get("BinaryBlob", "") if isinstance(data, dict) else ""
+            if not blob:
+                return False, 0, 0
+            decompressed = zlib.decompress(base64.b64decode(blob))
+            item_hits = decompressed.count(b"ItemStaticData")
+            inventory_hits = decompressed.count(b"SavedInventories") + decompressed.count(b"InventorySaveData")
+            return True, item_hits, inventory_hits
+        except Exception:
+            return False, 0, 0
+
+    def scan_prospect_sources(self, steam_dir: Path) -> list[dict[str, Any]]:
+        sources: list[dict[str, Any]] = []
+        prospects_dir = steam_dir / "Prospects"
+        if not prospects_dir.is_dir():
+            return sources
+        for prospect_path in sorted(prospects_dir.glob("*.json")):
+            if ".backup" in prospect_path.name:
+                continue
+            data = self.read_json_file(prospect_path, {})
+            info = data.get("ProspectInfo", {}) if isinstance(data, dict) else {}
+            prospect_id = info.get("ProspectID", prospect_path.stem) if isinstance(info, dict) else prospect_path.stem
+            decoded, item_hits, inventory_hits = self.prospect_blob_summary(prospect_path)
+            sources.append(
+                {
+                    "transferable": False,
+                    "kind": "prospect_blob",
+                    "path": str(prospect_path),
+                    "steam_id": steam_dir.name,
+                    "label": (
+                        f"{steam_dir.name} | Prospect {prospect_id} | live-world inventory blob "
+                        f"detected={decoded} itemMarkers={item_hits} inventoryMarkers={inventory_hits} | decoder pending"
+                    ),
+                }
+            )
+            members = info.get("AssociatedMembers", []) if isinstance(info, dict) else []
+            if isinstance(members, list):
+                for member in members:
+                    if isinstance(member, dict):
+                        sources.append(
+                            {
+                                "transferable": False,
+                                "kind": "prospect_member",
+                                "path": str(prospect_path),
+                                "steam_id": str(member.get("UserID", steam_dir.name)),
+                                "label": (
+                                    f"{prospect_id} | player {member.get('CharacterName', '?')} "
+                                    f"({member.get('UserID', '?')}) slot {member.get('ChrSlot', '?')} | member detected"
+                                ),
+                            }
+                        )
+        return sources
+
+    def scan_transfer_sources(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        root = self.player_data_root()
+        sources: list[dict[str, Any]] = []
+        targets: list[dict[str, Any]] = []
+        if not root.is_dir():
+            return sources, targets
+        for steam_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+            meta_sources, target = self.scan_meta_inventory_sources(steam_dir)
+            sources.extend(meta_sources)
+            targets.append(target)
+            sources.extend(self.scan_loadout_sources(steam_dir))
+            sources.extend(self.scan_prospect_sources(steam_dir))
+        return sources, targets
+
+    def refresh_transfer_vault(self) -> None:
+        try:
+            self.vault_sources, self.vault_targets = self.scan_transfer_sources()
+            self.vault_items = self.load_vault().get("items", [])
+            if self.vault_source_listbox is not None:
+                self.vault_source_listbox.delete(0, tk.END)
+                for source in self.vault_sources:
+                    prefix = "MOVE" if source.get("transferable") else "SCAN"
+                    self.vault_source_listbox.insert(tk.END, f"{prefix} | {source.get('label', '')}")
+            if self.vault_listbox is not None:
+                self.vault_listbox.delete(0, tk.END)
+                for item in self.vault_items:
+                    item_data = item.get("item", {}) if isinstance(item, dict) else {}
+                    self.vault_listbox.insert(
+                        tk.END,
+                        f"{item.get('id', '?')} | {self.item_row_name(item_data)} x{self.item_stack_value(item_data)} | from {item.get('source_label', '')}",
+                    )
+            target_labels = [target["label"] for target in self.vault_targets]
+            if self.vault_target_combo is not None:
+                self.vault_target_combo.configure(values=target_labels)
+            if target_labels and self.vault_target_var.get() not in target_labels:
+                self.vault_target_var.set(target_labels[0])
+            transferable = sum(1 for source in self.vault_sources if source.get("transferable"))
+            self.vault_summary_var.set(
+                f"Players scanned: {len(self.vault_targets)}    Move-ready JSON items: {transferable}    "
+                f"Vault items: {len(self.vault_items)}    Vault folder: {self.vault_dir}"
+            )
+        except Exception as error:
+            self.show_error("Transfer vault scan failed", error)
+
+    def selected_vault_source(self) -> dict[str, Any]:
+        if self.vault_source_listbox is None:
+            raise RuntimeError("Transfer source list is not available")
+        selection = self.vault_source_listbox.curselection()
+        if not selection:
+            raise RuntimeError("Select a source item first")
+        source = self.vault_sources[int(selection[0])]
+        if not source.get("transferable"):
+            raise RuntimeError("That entry is scan-only. Live prospect blob item movement needs the verified binary inventory writer first.")
+        return source
+
+    def selected_vault_item(self) -> dict[str, Any]:
+        if self.vault_listbox is None:
+            raise RuntimeError("Vault item list is not available")
+        selection = self.vault_listbox.curselection()
+        if not selection:
+            raise RuntimeError("Select a vault item first")
+        return self.vault_items[int(selection[0])]
+
+    def selected_vault_target(self) -> dict[str, Any]:
+        label = self.vault_target_var.get()
+        for target in self.vault_targets:
+            if target.get("label") == label:
+                return target
+        raise RuntimeError("Select a restore target first")
+
+    def remove_source_item(self, source: dict[str, Any]) -> dict[str, Any]:
+        path = Path(source["path"])
+        data = self.read_json_file(path, {})
+        if source["kind"] == "meta_inventory":
+            items = data.get("Items", [])
+            index = int(source["index"])
+            if not isinstance(items, list) or index >= len(items):
+                raise RuntimeError("Source inventory changed. Rescan before moving.")
+            item = items.pop(index)
+            self.write_json_file(path, data)
+            return item
+        if source["kind"] == "loadout_meta_item":
+            loadouts = data.get("Loadouts", [])
+            loadout_index = int(source["loadout_index"])
+            item_index = int(source["index"])
+            items = loadouts[loadout_index].get("MetaItems", [])
+            if not isinstance(items, list) or item_index >= len(items):
+                raise RuntimeError("Source loadout changed. Rescan before moving.")
+            item = items.pop(item_index)
+            self.write_json_file(path, data)
+            return item
+        raise RuntimeError(f"Unsupported source kind: {source['kind']}")
+
+    def vault_export_selected(self) -> None:
+        lock = None
+        try:
+            processes = self.running_icarus_processes()
+            if processes:
+                raise RuntimeError("Close Icarus before moving items into the transfer vault. Running processes: " + ", ".join(processes))
+            source = self.selected_vault_source()
+            if not messagebox.askyesno(
+                APP_NAME,
+                "Move this item into the shared transfer vault?\n\n"
+                "The app will create a save backup first, remove the item from the source JSON inventory, and write a ledger entry.",
+                parent=self,
+            ):
+                return
+            lock = self.acquire_vault_lock()
+            self.create_save_backup("pre_vault_export", silent=True)
+            item = self.remove_source_item(source)
+            vault = self.load_vault()
+            vault_item = {
+                "id": uuid4().hex,
+                "stored": datetime.now().isoformat(timespec="seconds"),
+                "source_label": source.get("label", ""),
+                "source": {key: value for key, value in source.items() if key != "item"},
+                "item": item,
+            }
+            vault["items"].append(vault_item)
+            self.save_vault(vault)
+            self.append_vault_ledger({"action": "export", "vault_id": vault_item["id"], "source": source.get("label", ""), "item": self.item_row_name(item)})
+            self.status_var.set(f"Moved item to transfer vault: {self.item_row_name(item)}")
+            self.refresh_transfer_vault()
+        except Exception as error:
+            self.show_error("Transfer vault export failed", error)
+        finally:
+            if lock is not None:
+                self.release_vault_lock(lock)
+
+    def add_item_to_target_inventory(self, target: dict[str, Any], item: dict[str, Any]) -> None:
+        path = Path(target["path"])
+        data = self.read_json_file(path, {"InventoryID": "MetaInventoryID_Main", "Items": []})
+        if not isinstance(data, dict):
+            raise RuntimeError(f"Target inventory is not a JSON object: {path}")
+        data.setdefault("InventoryID", "MetaInventoryID_Main")
+        data.setdefault("Items", [])
+        if not isinstance(data["Items"], list):
+            raise RuntimeError(f"Target inventory Items field is not a list: {path}")
+        data["Items"].append(self.reset_item_guid(item))
+        self.write_json_file(path, data)
+        verify = self.read_json_file(path, {})
+        verify_items = verify.get("Items", []) if isinstance(verify, dict) else []
+        if not isinstance(verify_items, list) or not verify_items:
+            raise RuntimeError("Target inventory verification failed after write")
+
+    def vault_import_selected(self) -> None:
+        lock = None
+        try:
+            processes = self.running_icarus_processes()
+            if processes:
+                raise RuntimeError("Close Icarus before restoring vault items. Running processes: " + ", ".join(processes))
+            vault_item = self.selected_vault_item()
+            target = self.selected_vault_target()
+            item = vault_item.get("item", {})
+            if not isinstance(item, dict):
+                raise RuntimeError("Vault item is malformed")
+            if not messagebox.askyesno(
+                APP_NAME,
+                "Restore this vault item to the selected player's MetaInventory?\n\n"
+                "The app will create a save backup first, add the item, remove it from the vault, and write a ledger entry.",
+                parent=self,
+            ):
+                return
+            lock = self.acquire_vault_lock()
+            self.create_save_backup("pre_vault_import", silent=True)
+            vault = self.load_vault()
+            items = vault.get("items", [])
+            vault_id = vault_item.get("id")
+            match_index = next((index for index, entry in enumerate(items) if isinstance(entry, dict) and entry.get("id") == vault_id), None)
+            if match_index is None:
+                raise RuntimeError("Vault item changed. Rescan before restoring.")
+            self.add_item_to_target_inventory(target, item)
+            items.pop(match_index)
+            self.save_vault(vault)
+            self.append_vault_ledger({"action": "import", "vault_id": vault_id, "target": target.get("label", ""), "item": self.item_row_name(item)})
+            self.status_var.set(f"Restored vault item: {self.item_row_name(item)}")
+            self.refresh_transfer_vault()
+        except Exception as error:
+            self.show_error("Transfer vault import failed", error)
+        finally:
+            if lock is not None:
+                self.release_vault_lock(lock)
+
+    def open_transfer_vault_folder(self) -> None:
+        try:
+            self.vault_dir.mkdir(parents=True, exist_ok=True)
+            os.startfile(self.vault_dir)
+        except Exception as error:
+            self.show_error("Open transfer vault folder failed", error)
 
     def runtime_mods_root(self, win64_dir: Path) -> Path:
         modern = win64_dir / "ue4ss"

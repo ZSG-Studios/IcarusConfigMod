@@ -33,6 +33,12 @@ LICENSE
 
 Runtime backups, player/world save backups, logs, saved Icarus folder selection, and generated runtime work files are stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\`, not in the extracted mod folder.
 
+## Transfer Vault
+
+Use the `Transfer Vault` tab to scan local Icarus players/worlds and move verified JSON-backed items through a shared offline stash. The vault creates backups, uses a lock file, and writes a transaction ledger.
+
+Live backpack/hotbar/container items inside prospect binary blobs are detected but scan-only in this beta until the binary inventory writer is validated.
+
 ## Profiles
 
 The app starts on `Vanilla Defaults`. The included premade profile is `Premade_Configuration`.
@@ -52,7 +58,7 @@ Partial=0 Pending=0 Skipped=0 Unsupported=0 MissingFields=0
 
 ## Beta Notes
 
-This `v0.1.1-beta` build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, and zero-value timer math.
+This `v0.1.2-beta` build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, zero-value timer math, and the first Transfer Vault beta.
 
 Skinning yield is applied through carcass output counts instead of tool-damage skinning efficiency, which prevents the yield setting from making carcasses deplete too quickly.
 
