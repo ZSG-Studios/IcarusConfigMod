@@ -17,7 +17,7 @@ This mod is built for configurable balance testing. It can adjust progression, r
 [*]Lets players create, save, import, and reuse custom profiles.[/*]
 [*]Creates an automatic player/world save backup before applying configuration changes.[/*]
 [*]Includes a Save Backups tab for manual backup, restore, refresh, and opening the backup folder.[/*]
-[*]Includes a Transfer Vault tab for scanning local players/worlds and moving verified JSON-backed items through a shared offline stash.[/*]
+[*]Includes a Transfer Vault tab for scanning local players/worlds, listing live prospect inventory item names read-only, and moving verified JSON-backed items through a shared offline stash.[/*]
 [*]Writes selected settings into a unified runtime config.[/*]
 [*]Applies supported settings in-game through the DLL backend.[/*]
 [*]Writes validation logs so players can confirm active settings applied.[/*]
@@ -76,7 +76,7 @@ If [b]GreenLight=NO[/b], check nearby [b]SETTING_STATUS[/b] lines to see which a
 
 [heading]Current Beta Notes[/heading]
 [list]
-[*]This [b]v0.1.2-beta[/b] build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, zero-value timer math, and the first Transfer Vault beta.[/*]
+[*]This [b]v0.1.3-beta[/b] build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, zero-value timer math, and the Transfer Vault beta with read-only live prospect inventory item listing.[/*]
 [*]Skinning yield now increases carcass output counts instead of changing [b]D_ToolDamage.Skinning_Efficiency[/b], which could make carcasses deplete too quickly.[/*]
 [*]Baseline 0 values now stay 0 during multiplier math, preventing disabled or sentinel timers from becoming one-second timers.[/*]
 [*]Free craft no longer clears [b]ResourceInputs[/b], avoiding live resource drain behavior.[/*]
@@ -117,10 +117,10 @@ The [b]Transfer Vault[/b] tab scans local Icarus player folders and prospect fil
 [*]Uses a [b]vault.lock[/b] file so two vault operations cannot run at the same time.[/*]
 [*]Writes a transaction ledger to [b]transfer_vault\ledger.jsonl[/b].[/*]
 [*]Refuses item moves while Icarus is open.[/*]
-[*]Detects active prospect members and compressed live-world inventory blobs.[/*]
+[*]Detects active prospect members and decodes compressed live-world inventory item row names read-only.[/*]
 [/list]
 
-[b]Beta limit:[/b] live backpack, hotbar, belt, equipment, mount cargo, and world container items inside [b]ProspectBlob.BinaryBlob[/b] are scan-only until the Unreal property writer is fully validated.
+[b]Beta limit:[/b] live backpack, hotbar, belt, equipment, mount cargo, and world container items inside [b]ProspectBlob.BinaryBlob[/b] are listed read-only until the Unreal property writer is fully validated.
 
 [heading]Installation Instructions[/heading]
 [list=1]

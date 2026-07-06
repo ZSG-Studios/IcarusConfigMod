@@ -23,7 +23,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "Icarus Balance Configurator"
-APP_VERSION = "0.1.2-beta"
+APP_VERSION = "0.1.3-beta"
 UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 RUNTIME_MOD_FOLDER = "Configuration_Mod"
 RUNTIME_INI_NAME = "settings.ini"
@@ -1707,11 +1707,99 @@ class Configurator(tk.Tk):
             if not blob:
                 return False, 0, 0
             decompressed = zlib.decompress(base64.b64decode(blob))
-            item_hits = decompressed.count(b"ItemStaticData")
+            item_hits = decompressed.count(b"ItemStaticData\x00")
             inventory_hits = decompressed.count(b"SavedInventories") + decompressed.count(b"InventorySaveData")
             return True, item_hits, inventory_hits
         except Exception:
             return False, 0, 0
+
+    def plausible_unreal_name(self, value: str) -> bool:
+        if not value or len(value) > 160:
+            return False
+        return re.fullmatch(r"[A-Za-z0-9_./:-]+", value) is not None
+
+    def unreal_string_near(self, data: bytes, start: int, max_scan: int = 24) -> str | None:
+        for shift in range(max_scan):
+            cursor = start + shift
+            if cursor + 4 > len(data):
+                return None
+            length = int.from_bytes(data[cursor:cursor + 4], "little", signed=True)
+            if 1 <= length <= 160 and cursor + 4 + length <= len(data):
+                raw = data[cursor + 4:cursor + 4 + length]
+                if raw.endswith(b"\x00"):
+                    try:
+                        value = raw[:-1].decode("utf-8")
+                    except UnicodeDecodeError:
+                        value = ""
+                    if self.plausible_unreal_name(value):
+                        return value
+            if -160 <= length < 0:
+                char_count = abs(length)
+                byte_count = char_count * 2
+                if cursor + 4 + byte_count <= len(data):
+                    raw = data[cursor + 4:cursor + 4 + byte_count]
+                    try:
+                        value = raw.decode("utf-16-le", errors="strict").rstrip("\x00")
+                    except UnicodeDecodeError:
+                        value = ""
+                    if self.plausible_unreal_name(value):
+                        return value
+        return None
+
+    def unreal_property_string_after(self, data: bytes, property_name_end: int) -> str | None:
+        try:
+            cursor = property_name_end
+            if cursor + 12 > len(data):
+                return None
+            return self.unreal_string_near(data, cursor)
+        except Exception:
+            return None
+
+    def unreal_name_property_after_key(self, data: bytes, key: bytes, start: int = 0) -> tuple[str | None, int]:
+        key_pos = data.find(key, start)
+        if key_pos < 0:
+            return None, -1
+        prop = b"NameProperty\x00"
+        prop_pos = data.find(prop, key_pos, key_pos + 256)
+        if prop_pos < 0:
+            return None, key_pos
+        return self.unreal_property_string_after(data, prop_pos + len(prop)), key_pos
+
+    def nearest_blob_actor_name(self, data: bytes, item_pos: int) -> str:
+        search_start = max(0, item_pos - 12000)
+        chunk = data[search_start:item_pos]
+        marker = b"ObjectFName\x00"
+        rel = chunk.rfind(marker)
+        if rel < 0:
+            return "Unknown saved inventory"
+        name, _pos = self.unreal_name_property_after_key(data, marker, search_start + rel)
+        return name or "Unknown saved inventory"
+
+    def extract_prospect_blob_items(self, prospect_path: Path) -> list[dict[str, Any]]:
+        data = self.read_json_file(prospect_path, {})
+        blob = data.get("ProspectBlob", {}).get("BinaryBlob", "") if isinstance(data, dict) else ""
+        if not blob:
+            return []
+        decompressed = zlib.decompress(base64.b64decode(blob))
+        items: list[dict[str, Any]] = []
+        cursor = 0
+        marker = b"ItemStaticData\x00"
+        while True:
+            item_pos = decompressed.find(marker, cursor)
+            if item_pos < 0:
+                break
+            row_name, _row_pos = self.unreal_name_property_after_key(decompressed, marker, item_pos)
+            if row_name and row_name != "None":
+                actor_name = self.nearest_blob_actor_name(decompressed, item_pos)
+                items.append(
+                    {
+                        "row_name": row_name,
+                        "actor_name": actor_name,
+                        "offset": item_pos,
+                    }
+                )
+            cursor = item_pos + len(marker)
+        return items
 
     def scan_prospect_sources(self, steam_dir: Path) -> list[dict[str, Any]]:
         sources: list[dict[str, Any]] = []
@@ -1733,10 +1821,31 @@ class Configurator(tk.Tk):
                     "steam_id": steam_dir.name,
                     "label": (
                         f"{steam_dir.name} | Prospect {prospect_id} | live-world inventory blob "
-                        f"detected={decoded} itemMarkers={item_hits} inventoryMarkers={inventory_hits} | decoder pending"
+                        f"detected={decoded} itemRows={item_hits} inventoryMarkers={inventory_hits} | decoded view-only"
                     ),
                 }
             )
+            try:
+                blob_items = self.extract_prospect_blob_items(prospect_path)
+            except Exception:
+                blob_items = []
+            for index, item in enumerate(blob_items):
+                sources.append(
+                    {
+                        "transferable": False,
+                        "kind": "prospect_blob_item",
+                        "path": str(prospect_path),
+                        "steam_id": steam_dir.name,
+                        "item_index": index,
+                        "row_name": item["row_name"],
+                        "actor_name": item["actor_name"],
+                        "offset": item["offset"],
+                        "label": (
+                            f"{steam_dir.name} | Prospect {prospect_id} | {item['actor_name']} | "
+                            f"{item['row_name']} | blob item offset {item['offset']} | view-only"
+                        ),
+                    }
+                )
             members = info.get("AssociatedMembers", []) if isinstance(info, dict) else []
             if isinstance(members, list):
                 for member in members:

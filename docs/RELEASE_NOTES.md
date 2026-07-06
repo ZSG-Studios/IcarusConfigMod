@@ -1,5 +1,19 @@
 # Release Notes
 
+## v0.1.3-beta - Transfer Vault Item Viewer
+
+This update improves the Transfer Vault scanner so players can see item names stored inside live prospect inventory data.
+
+### Added
+
+- Transfer Vault now decodes `ItemStaticData` rows from compressed `ProspectBlob.BinaryBlob` data.
+- Live prospect backpack, world, and container inventory entries are listed with item row names in the source list.
+- Prospect blob summaries now report decoded item rows instead of rough text marker hits.
+
+### Limit
+
+- Live prospect blob items are still read-only. Verified JSON-backed meta/loadout items can be moved through the vault, but live backpack, hotbar, belt, equipment, mount cargo, and world container item movement remains disabled until the Unreal property writer is validated.
+
 ## v0.1.2-beta - Transfer Vault Beta
 
 This update focuses on runtime safety, validation accuracy, and release packaging cleanup.

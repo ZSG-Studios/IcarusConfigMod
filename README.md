@@ -22,7 +22,7 @@ If Icarus is not found automatically, the configurator prompts the player to sel
 
 Runtime backups, player/world save backups, logs, and generated runtime work files are stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\` instead of beside the portable exe or inside the extracted program folder.
 
-The configurator also includes a `Transfer Vault` tab. It scans all local Icarus player folders, detects active prospect members, and provides a locked shared stash for verified JSON-backed items such as `MetaInventory.json` and loadout meta items. Live in-world inventories inside `ProspectBlob.BinaryBlob` are detected and reported, but item movement from that compressed Unreal property blob is not enabled until the binary inventory writer is verified.
+The configurator also includes a `Transfer Vault` tab. It scans all local Icarus player folders, detects active prospect members, decodes live prospect inventory item names from `ProspectBlob.BinaryBlob`, and provides a locked shared stash for verified JSON-backed items such as `MetaInventory.json` and loadout meta items. Live backpack/world/container items from the compressed Unreal property blob are shown read-only until the binary inventory writer is verified.
 
 ## Player Package Layout
 
@@ -82,13 +82,14 @@ Use `--debug-risky-arrays` only when intentionally testing free-craft style arra
 
 See [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) for the latest beta fix notes.
 
-Recent runtime fixes in `v0.1.2-beta`:
+Recent runtime fixes in `v0.1.3-beta`:
 
 - Skinning yield now increases carcass recipe output counts instead of touching `D_ToolDamage.Skinning_Efficiency`, which could make carcasses deplete too quickly.
 - Baseline `0` values now remain `0` during multiplier math, preventing disabled/sentinel timers from becoming one-second timers.
 - Free-craft no longer clears `ResourceInputs`, avoiding live resource drain behavior.
 - Generic recipe/material/free-craft array edits skip carcass processor rows.
 - Stack and container slot runtime mutation is clamped so it cannot shrink below the vanilla baseline.
+- Transfer Vault now decodes and lists live prospect inventory item row names read-only, including items stored in compressed prospect/container inventory data.
 
 Some settings are table-backed rather than direct live-player writes. Health, stamina, carry capacity, movement speed, and regen mutate `D_CharacterStartingStats` grants, so the game may recalculate visible values only after session load, spawn, respawn, healing, or other stat refresh behavior. Air control is applied directly to loaded movement components and should be more immediately visible.
 
@@ -111,14 +112,14 @@ The `Transfer Vault` tab is an offline shared stash for local players and worlds
 
 - Scans all local `%LOCALAPPDATA%\Icarus\Saved\PlayerData\<SteamID>` folders.
 - Detects prospect members from prospect save metadata.
-- Detects compressed live-world prospect inventory blobs and reports item/inventory markers.
+- Detects compressed live-world prospect inventory blobs and lists decoded item row names read-only.
 - Moves verified JSON-backed items into `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\transfer_vault\vault.json`.
 - Uses an exclusive `vault.lock` file so two vault operations cannot run at the same time.
 - Writes a transaction ledger to `transfer_vault\ledger.jsonl`.
 - Creates a full save backup before every vault export/import.
 - Refuses to run item moves while Icarus is open.
 
-Current beta support is intentionally conservative: JSON-backed meta/loadout items can be moved; live backpack/hotbar/container items inside the prospect binary blob are scan-only until the Unreal property writer is fully validated.
+Current beta support is intentionally conservative: JSON-backed meta/loadout items can be moved; live backpack/hotbar/container items inside the prospect binary blob are listed read-only until the Unreal property writer is fully validated.
 
 ## Source Layout
 

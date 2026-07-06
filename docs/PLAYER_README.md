@@ -37,7 +37,7 @@ Runtime backups, player/world save backups, logs, saved Icarus folder selection,
 
 Use the `Transfer Vault` tab to scan local Icarus players/worlds and move verified JSON-backed items through a shared offline stash. The vault creates backups, uses a lock file, and writes a transaction ledger.
 
-Live backpack/hotbar/container items inside prospect binary blobs are detected but scan-only in this beta until the binary inventory writer is validated.
+Live backpack/hotbar/container items inside prospect binary blobs are decoded and listed read-only in this beta until the binary inventory writer is validated.
 
 ## Profiles
 
@@ -58,7 +58,7 @@ Partial=0 Pending=0 Skipped=0 Unsupported=0 MissingFields=0
 
 ## Beta Notes
 
-This `v0.1.2-beta` build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, zero-value timer math, and the first Transfer Vault beta.
+This `v0.1.3-beta` build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, zero-value timer math, and the Transfer Vault beta with read-only live prospect inventory item listing.
 
 Skinning yield is applied through carcass output counts instead of tool-damage skinning efficiency, which prevents the yield setting from making carcasses deplete too quickly.
 
