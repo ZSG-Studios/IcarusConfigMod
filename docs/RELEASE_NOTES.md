@@ -1,5 +1,24 @@
 # Release Notes
 
+## v0.1.7-beta - Transfer Vault Checked Items
+
+This update adds persistent checked row state to the Transfer Vault item browser and improves player inventory names.
+
+### Added
+
+- Item rows in the Transfer Vault source browser now show checkbox-style `[ ]` / `[x]` state.
+- Checked item rows stay checked when switching the inventory dropdown or refreshing the visible list.
+- The summary now reports total checked rows and how many checked rows are move-ready JSON items.
+- `Move Checked To Vault` uses checked move-ready JSON items; if nothing is checked, the highlighted row still works as a fallback.
+- The source browser now works one exposed inventory at a time; the all-inventories working view was removed.
+- Internal attachment, ammo-slot, and prospect-manager inventories are hidden from the dropdown.
+- Same-name containers are separated with unique suffixes so each dropdown option maps to one actual inventory.
+
+### Fixed
+
+- Player recorder inventories now use prospect/local character names when `PlayerID` and `ChrSlot` can be matched.
+- View-only live prospect rows can be checked for tracking, but export refuses them until the binary writer is safe.
+
 ## v0.1.6-beta - Transfer Vault Inventory Names
 
 This update improves the Transfer Vault inventory dropdown labels so items are grouped under the inventory they are actually saved in.

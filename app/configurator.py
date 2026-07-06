@@ -23,7 +23,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "Icarus Balance Configurator"
-APP_VERSION = "0.1.6-beta"
+APP_VERSION = "0.1.7-beta"
 UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 RUNTIME_MOD_FOLDER = "Configuration_Mod"
 RUNTIME_INI_NAME = "settings.ini"
@@ -681,7 +681,8 @@ class Configurator(tk.Tk):
         self.vault_inventory_combo: ttk.Combobox | None = None
         self.vault_target_combo: ttk.Combobox | None = None
         self.vault_summary_var = tk.StringVar(value="Transfer vault not scanned")
-        self.vault_inventory_var = tk.StringVar(value="All inventories")
+        self.vault_inventory_var = tk.StringVar(value="")
+        self.vault_checked_source_ids: set[str] = set()
         self.vault_all_sources: list[dict[str, Any]] = []
         self.vault_sources: list[dict[str, Any]] = []
         self.vault_items: list[dict[str, Any]] = []
@@ -947,7 +948,7 @@ class Configurator(tk.Tk):
         actions = ttk.Frame(outer, style="App.TFrame")
         actions.pack(fill=tk.X, pady=(0, 8))
         ttk.Button(actions, text="Scan Saves", style="Primary.TButton", command=self.refresh_transfer_vault).pack(side=tk.LEFT)
-        ttk.Button(actions, text="Move Selected To Vault", style="Soft.TButton", command=self.vault_export_selected).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(actions, text="Move Checked To Vault", style="Soft.TButton", command=self.vault_export_selected).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(actions, text="Restore Vault Item", style="Soft.TButton", command=self.vault_import_selected).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(actions, text="Open Vault Folder", style="Soft.TButton", command=self.open_transfer_vault_folder).pack(side=tk.LEFT, padx=(6, 0))
 
@@ -997,6 +998,8 @@ class Configurator(tk.Tk):
         source_scroll = ttk.Scrollbar(left, orient=tk.VERTICAL, command=self.vault_source_listbox.yview)
         self.vault_source_listbox.configure(yscrollcommand=source_scroll.set)
         self.vault_source_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.vault_source_listbox.bind("<ButtonRelease-1>", self.toggle_vault_source_check)
+        self.vault_source_listbox.bind("<space>", self.toggle_vault_source_check)
         source_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         right = ttk.LabelFrame(columns, text="Shared Transfer Vault", style="Card.TLabelframe", padding=8)
@@ -1599,6 +1602,49 @@ class Configurator(tk.Tk):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=4) + "\n", encoding="utf-8")
 
+    def parse_embedded_json_strings(self, value: Any) -> list[dict[str, Any]]:
+        parsed: list[dict[str, Any]] = []
+        if isinstance(value, dict):
+            for nested in value.values():
+                parsed.extend(self.parse_embedded_json_strings(nested))
+        elif isinstance(value, list):
+            for entry in value:
+                if isinstance(entry, str):
+                    try:
+                        item = json.loads(entry)
+                    except Exception:
+                        continue
+                    if isinstance(item, dict):
+                        parsed.append(item)
+                elif isinstance(entry, dict):
+                    parsed.append(entry)
+                    parsed.extend(self.parse_embedded_json_strings(entry))
+        return parsed
+
+    def local_character_names(self, steam_dir: Path) -> dict[tuple[str, int], str]:
+        names: dict[tuple[str, int], str] = {}
+        data = self.read_json_file(steam_dir / "Characters.json", {})
+        for character in self.parse_embedded_json_strings(data):
+            name = character.get("CharacterName")
+            slot = character.get("ChrSlot")
+            if isinstance(name, str) and name.strip() and isinstance(slot, int):
+                names[(steam_dir.name, slot)] = name.strip()
+        return names
+
+    def prospect_member_names(self, info: dict[str, Any], steam_dir: Path) -> dict[tuple[str, int], str]:
+        names = self.local_character_names(steam_dir)
+        members = info.get("AssociatedMembers", []) if isinstance(info, dict) else []
+        if isinstance(members, list):
+            for member in members:
+                if not isinstance(member, dict):
+                    continue
+                user_id = str(member.get("UserID", "")).strip()
+                slot = member.get("ChrSlot")
+                name = str(member.get("CharacterName") or member.get("AccountName") or "").strip()
+                if user_id and isinstance(slot, int) and name:
+                    names[(user_id, slot)] = name
+        return names
+
     def item_row_name(self, item: dict[str, Any]) -> str:
         static = item.get("ItemStaticData", {})
         if isinstance(static, dict):
@@ -1635,6 +1681,24 @@ class Configurator(tk.Tk):
         name = name.replace("_", " ")
         name = re.sub(r"\s+", " ", name).strip()
         return name or fallback
+
+    def exposed_transfer_inventory(self, label: str, kind: str = "") -> bool:
+        text = label.casefold()
+        hidden_terms = (
+            "attachment",
+            "ammoslot",
+            "ammo slot",
+            "prospect inventory",
+            "icarusgamemode",
+            "saved inventory",
+        )
+        return not any(term in text for term in hidden_terms)
+
+    def container_suffix(self, actor_name: str) -> str:
+        suffix = self.generated_actor_suffix(actor_name)
+        if suffix:
+            return f" #{suffix}"
+        return ""
 
     def item_display_amount(self, item: dict[str, Any]) -> Any:
         if "amount" in item:
@@ -1808,6 +1872,7 @@ class Configurator(tk.Tk):
                             "steam_id": steam_dir.name,
                             "index": index,
                             "item": item,
+                            "inventory_key": f"meta:{meta_path}",
                             "inventory_label": f"{steam_dir.name} - Meta Inventory",
                             "display_name": self.item_display_name(item),
                             "display_amount": amount,
@@ -1841,6 +1906,7 @@ class Configurator(tk.Tk):
                             "loadout_index": loadout_index,
                             "index": item_index,
                             "item": item,
+                            "inventory_key": f"loadout:{path}:{loadout_index}",
                             "inventory_label": f"{steam_dir.name} - Loadout {loadout_index}",
                             "display_name": self.item_display_name(item),
                             "display_amount": amount,
@@ -1924,6 +1990,16 @@ class Configurator(tk.Tk):
             return None, key_pos
         return self.unreal_property_string_after(data, prop_pos + len(prop)), key_pos
 
+    def unreal_str_property_after_key_limited(self, data: bytes, key: bytes, start: int, end: int) -> tuple[str | None, int]:
+        key_pos = data.find(key, start, end)
+        if key_pos < 0:
+            return None, -1
+        prop = b"StrProperty\x00"
+        prop_pos = data.find(prop, key_pos, min(end, key_pos + 256))
+        if prop_pos < 0:
+            return None, key_pos
+        return self.unreal_property_string_after(data, prop_pos + len(prop)), key_pos
+
     def nearest_blob_actor_name(self, data: bytes, item_pos: int) -> str:
         search_start = max(0, item_pos - 200000)
         chunk = data[search_start:item_pos]
@@ -1980,7 +2056,13 @@ class Configurator(tk.Tk):
         match = re.search(r"_(\d+)$", actor_name)
         return str(int(match.group(1))) if match else ""
 
-    def blob_actor_component_inventory_name(self, data: bytes, item_pos: int, actor_name: str) -> str | None:
+    def blob_actor_component_inventory_name(
+        self,
+        data: bytes,
+        item_pos: int,
+        actor_name: str,
+        player_names: dict[tuple[str, int], str] | None = None,
+    ) -> str | None:
         inventory_start = self.nearest_blob_saved_inventory_start(data, item_pos)
         actor_start = self.nearest_blob_actor_start(data, item_pos)
         if inventory_start <= actor_start:
@@ -1991,6 +2073,12 @@ class Configurator(tk.Tk):
         if b"IcarusMountCharacterRecorderComponent" in chunk:
             return f"Mount Inventory{suffix_text}"
         if b"PlayerStateRecorderComponent" in chunk or b"PlayerRecorderComponent" in chunk:
+            player_id, _player_pos = self.unreal_str_property_after_key_limited(data, b"PlayerID\x00", actor_start, inventory_start)
+            slot = self.unreal_int_property_after_key(data, b"ChrSlot\x00", actor_start, inventory_start - actor_start)
+            if player_names and player_id and isinstance(slot, int):
+                player_name = player_names.get((str(player_id), slot))
+                if player_name:
+                    return f"{player_name} Inventory"
             return f"Player Inventory{suffix_text}"
         if b"IcarusContainerManagerRecorderComponent" in chunk or b"IcarusGameMode" in chunk:
             return "Prospect Inventory"
@@ -1998,19 +2086,29 @@ class Configurator(tk.Tk):
             return f"Voxel Inventory{suffix_text}"
         return None
 
-    def blob_inventory_display_name(self, data: bytes, item_pos: int, actor_name: str) -> str:
+    def blob_inventory_display_name(
+        self,
+        data: bytes,
+        item_pos: int,
+        actor_name: str,
+        player_names: dict[tuple[str, int], str] | None = None,
+    ) -> str:
         inventory_info = self.nearest_blob_inventory_info(data, item_pos)
         if inventory_info:
             return self.clean_inventory_name(inventory_info, "Saved Inventory")
         deployable_name = self.blob_deployable_row_name(data, item_pos)
         if deployable_name:
             return self.clean_inventory_name(deployable_name, "Saved Inventory")
-        component_name = self.blob_actor_component_inventory_name(data, item_pos, actor_name)
+        component_name = self.blob_actor_component_inventory_name(data, item_pos, actor_name, player_names)
         if component_name:
             return component_name
         return self.clean_inventory_name(actor_name, "Saved Inventory")
 
-    def extract_prospect_blob_items(self, prospect_path: Path) -> list[dict[str, Any]]:
+    def extract_prospect_blob_items(
+        self,
+        prospect_path: Path,
+        player_names: dict[tuple[str, int], str] | None = None,
+    ) -> list[dict[str, Any]]:
         data = self.read_json_file(prospect_path, {})
         blob = data.get("ProspectBlob", {}).get("BinaryBlob", "") if isinstance(data, dict) else ""
         if not blob:
@@ -2028,7 +2126,7 @@ class Configurator(tk.Tk):
             row_name, _row_pos = self.unreal_name_property_after_key(decompressed, marker, item_pos)
             if row_name and row_name != "None":
                 actor_name = self.nearest_blob_actor_name(decompressed, item_pos)
-                inventory_name = self.blob_inventory_display_name(decompressed, item_pos, actor_name)
+                inventory_name = self.blob_inventory_display_name(decompressed, item_pos, actor_name, player_names)
                 amount = self.unreal_int_property_after_key(decompressed, b"Value\x00", item_pos, item_end - item_pos)
                 items.append(
                     {
@@ -2053,6 +2151,7 @@ class Configurator(tk.Tk):
             data = self.read_json_file(prospect_path, {})
             info = data.get("ProspectInfo", {}) if isinstance(data, dict) else {}
             prospect_id = info.get("ProspectID", prospect_path.stem) if isinstance(info, dict) else prospect_path.stem
+            player_names = self.prospect_member_names(info, steam_dir)
             decoded, item_hits, inventory_hits = self.prospect_blob_summary(prospect_path)
             sources.append(
                 {
@@ -2067,13 +2166,18 @@ class Configurator(tk.Tk):
                 }
             )
             try:
-                blob_items = self.extract_prospect_blob_items(prospect_path)
+                blob_items = self.extract_prospect_blob_items(prospect_path, player_names)
             except Exception:
                 blob_items = []
             for index, item in enumerate(blob_items):
+                suffix = self.container_suffix(item.get("actor_name", ""))
+                inventory_name = item.get("inventory_name") or self.clean_inventory_name(item["actor_name"], "Saved Inventory")
+                suffix_value = suffix.lstrip(" #")
+                if suffix and suffix not in inventory_name and not re.search(rf"\b{re.escape(suffix_value)}$", inventory_name):
+                    inventory_name = f"{inventory_name}{suffix}"
                 inventory_label = (
                     f"Prospect {prospect_id} - "
-                    f"{item.get('inventory_name') or self.clean_inventory_name(item['actor_name'], 'Saved Inventory')}"
+                    f"{inventory_name}"
                 )
                 display_name = self.clean_item_name(item["row_name"])
                 amount = item.get("amount", 1)
@@ -2088,6 +2192,7 @@ class Configurator(tk.Tk):
                         "actor_name": item["actor_name"],
                         "amount": amount,
                         "offset": item["offset"],
+                        "inventory_key": f"prospect_blob:{prospect_path}:{item['actor_name']}",
                         "inventory_label": inventory_label,
                         "display_name": display_name,
                         "display_amount": amount,
@@ -2126,21 +2231,41 @@ class Configurator(tk.Tk):
             sources.extend(self.scan_prospect_sources(steam_dir))
         return sources, targets
 
+    def vault_source_id(self, source: dict[str, Any]) -> str:
+        parts = [
+            str(source.get("kind", "")),
+            str(source.get("path", "")),
+            str(source.get("steam_id", "")),
+            str(source.get("loadout_index", "")),
+            str(source.get("index", "")),
+            str(source.get("item_index", "")),
+            str(source.get("offset", "")),
+            str(source.get("row_name", "")),
+        ]
+        return "|".join(parts)
+
     def vault_inventory_labels(self) -> list[str]:
-        labels: list[str] = ["All inventories"]
+        labels: list[str] = []
         for source in self.vault_all_sources:
             label = source.get("inventory_label")
-            if isinstance(label, str) and label and label not in labels:
+            kind = str(source.get("kind", ""))
+            if (
+                isinstance(label, str)
+                and label
+                and label not in labels
+                and self.exposed_transfer_inventory(label, kind)
+            ):
                 labels.append(label)
         return labels
 
     def filtered_vault_sources(self) -> list[dict[str, Any]]:
         selected = self.vault_inventory_var.get()
-        if not selected or selected == "All inventories":
-            return [source for source in self.vault_all_sources if source.get("inventory_label")]
+        if not selected:
+            return []
         return [
             source for source in self.vault_all_sources
             if source.get("inventory_label") == selected
+            and self.exposed_transfer_inventory(str(source.get("inventory_label", "")), str(source.get("kind", "")))
         ]
 
     def refresh_vault_source_list(self) -> None:
@@ -2148,6 +2273,8 @@ class Configurator(tk.Tk):
         if self.vault_source_listbox is not None:
             self.vault_source_listbox.delete(0, tk.END)
             for source in self.vault_sources:
+                source_id = self.vault_source_id(source)
+                checked = "[x]" if source_id in self.vault_checked_source_ids else "[ ]"
                 prefix = "MOVE" if source.get("transferable") else "VIEW"
                 inventory = source.get("inventory_label", "Inventory")
                 item = source.get("item", {})
@@ -2157,17 +2284,51 @@ class Configurator(tk.Tk):
                 if not name:
                     name = source.get("label", "Unknown Item")
                 amount = source.get("display_amount", 1)
-                self.vault_source_listbox.insert(tk.END, f"{prefix} | {inventory} | {name} x{amount}")
+                self.vault_source_listbox.insert(tk.END, f"{checked} {prefix} | {inventory} | {name} x{amount}")
+
+    def toggle_vault_source_check(self, event: tk.Event | None = None) -> str | None:
+        if self.vault_source_listbox is None:
+            return None
+        if event is not None and getattr(event, "keysym", "") == "space":
+            selection = self.vault_source_listbox.curselection()
+            if not selection:
+                return "break"
+            index = int(selection[0])
+        elif event is not None and hasattr(event, "y"):
+            index = int(self.vault_source_listbox.nearest(event.y))
+            if index < 0 or index >= len(self.vault_sources):
+                return None
+            self.vault_source_listbox.selection_clear(0, tk.END)
+            self.vault_source_listbox.selection_set(index)
+        else:
+            selection = self.vault_source_listbox.curselection()
+            if not selection:
+                return None
+            index = int(selection[0])
+        if index >= len(self.vault_sources):
+            return "break"
+        source_id = self.vault_source_id(self.vault_sources[index])
+        if source_id in self.vault_checked_source_ids:
+            self.vault_checked_source_ids.remove(source_id)
+        else:
+            self.vault_checked_source_ids.add(source_id)
+        self.refresh_vault_source_list()
+        if self.vault_source_listbox is not None:
+            self.vault_source_listbox.selection_set(index)
+            self.vault_source_listbox.see(index)
+        return "break"
 
     def refresh_transfer_vault(self) -> None:
         try:
             self.vault_all_sources, self.vault_targets = self.scan_transfer_sources()
+            valid_source_ids = {self.vault_source_id(source) for source in self.vault_all_sources}
+            self.vault_checked_source_ids.intersection_update(valid_source_ids)
             self.vault_items = self.load_vault().get("items", [])
             inventory_labels = self.vault_inventory_labels()
             if self.vault_inventory_combo is not None:
                 self.vault_inventory_combo.configure(values=inventory_labels)
             if self.vault_inventory_var.get() not in inventory_labels:
-                self.vault_inventory_var.set(inventory_labels[0] if inventory_labels else "All inventories")
+                self.vault_inventory_var.set(inventory_labels[0] if inventory_labels else "")
             self.refresh_vault_source_list()
             if self.vault_listbox is not None:
                 self.vault_listbox.delete(0, tk.END)
@@ -2182,11 +2343,22 @@ class Configurator(tk.Tk):
                 self.vault_target_combo.configure(values=target_labels)
             if target_labels and self.vault_target_var.get() not in target_labels:
                 self.vault_target_var.set(target_labels[0])
-            transferable = sum(1 for source in self.vault_all_sources if source.get("transferable"))
-            view_only = sum(1 for source in self.vault_all_sources if source.get("inventory_label") and not source.get("transferable"))
+            exposed_sources = [
+                source for source in self.vault_all_sources
+                if source.get("inventory_label")
+                and self.exposed_transfer_inventory(str(source.get("inventory_label", "")), str(source.get("kind", "")))
+            ]
+            transferable = sum(1 for source in exposed_sources if source.get("transferable"))
+            view_only = sum(1 for source in exposed_sources if not source.get("transferable"))
+            checked_total = len(self.vault_checked_source_ids)
+            checked_move_ready = sum(
+                1 for source in self.vault_all_sources
+                if source.get("transferable") and self.vault_source_id(source) in self.vault_checked_source_ids
+            )
             self.vault_summary_var.set(
-                f"Players scanned: {len(self.vault_targets)}    Inventories: {max(0, len(inventory_labels) - 1)}    "
+                f"Players scanned: {len(self.vault_targets)}    Exposed inventories: {len(inventory_labels)}    "
                 f"Move-ready JSON items: {transferable}    View-only live items: {view_only}    "
+                f"Checked: {checked_total} ({checked_move_ready} move-ready)    "
                 f"Vault items: {len(self.vault_items)}    Vault folder: {self.vault_dir}"
             )
         except Exception as error:
@@ -2202,6 +2374,28 @@ class Configurator(tk.Tk):
         if not source.get("transferable"):
             raise RuntimeError("That entry is scan-only. Live prospect blob item movement needs the verified binary inventory writer first.")
         return source
+
+    def selected_vault_sources_for_export(self) -> list[dict[str, Any]]:
+        checked_sources = [
+            source for source in self.vault_all_sources
+            if self.vault_source_id(source) in self.vault_checked_source_ids
+        ]
+        if not checked_sources:
+            return [self.selected_vault_source()]
+        blocked = [source for source in checked_sources if not source.get("transferable")]
+        if blocked:
+            raise RuntimeError(
+                "Checked items include view-only live prospect entries. Uncheck VIEW rows before moving items to the vault."
+            )
+        return sorted(
+            checked_sources,
+            key=lambda source: (
+                str(source.get("path", "")),
+                int(source.get("loadout_index", -1) if str(source.get("loadout_index", "-1")).lstrip("-").isdigit() else -1),
+                int(source.get("index", -1) if str(source.get("index", "-1")).lstrip("-").isdigit() else -1),
+            ),
+            reverse=True,
+        )
 
     def selected_vault_item(self) -> dict[str, Any]:
         if self.vault_listbox is None:
@@ -2247,29 +2441,34 @@ class Configurator(tk.Tk):
             processes = self.running_icarus_processes()
             if processes:
                 raise RuntimeError("Close Icarus before moving items into the transfer vault. Running processes: " + ", ".join(processes))
-            source = self.selected_vault_source()
+            sources = self.selected_vault_sources_for_export()
+            item_word = "item" if len(sources) == 1 else "items"
             if not messagebox.askyesno(
                 APP_NAME,
-                "Move this item into the shared transfer vault?\n\n"
-                "The app will create a save backup first, remove the item from the source JSON inventory, and write a ledger entry.",
+                f"Move {len(sources)} checked {item_word} into the shared transfer vault?\n\n"
+                "The app will create a save backup first, remove the item(s) from source JSON inventory, and write ledger entries.",
                 parent=self,
             ):
                 return
             lock = self.acquire_vault_lock()
             self.create_save_backup("pre_vault_export", silent=True)
-            item = self.remove_source_item(source)
             vault = self.load_vault()
-            vault_item = {
-                "id": uuid4().hex,
-                "stored": datetime.now().isoformat(timespec="seconds"),
-                "source_label": source.get("label", ""),
-                "source": {key: value for key, value in source.items() if key != "item"},
-                "item": item,
-            }
-            vault["items"].append(vault_item)
+            moved_names: list[str] = []
+            for source in sources:
+                item = self.remove_source_item(source)
+                vault_item = {
+                    "id": uuid4().hex,
+                    "stored": datetime.now().isoformat(timespec="seconds"),
+                    "source_label": source.get("label", ""),
+                    "source": {key: value for key, value in source.items() if key != "item"},
+                    "item": item,
+                }
+                vault["items"].append(vault_item)
+                moved_names.append(self.item_row_name(item))
+                self.vault_checked_source_ids.discard(self.vault_source_id(source))
+                self.append_vault_ledger({"action": "export", "vault_id": vault_item["id"], "source": source.get("label", ""), "item": self.item_row_name(item)})
             self.save_vault(vault)
-            self.append_vault_ledger({"action": "export", "vault_id": vault_item["id"], "source": source.get("label", ""), "item": self.item_row_name(item)})
-            self.status_var.set(f"Moved item to transfer vault: {self.item_row_name(item)}")
+            self.status_var.set(f"Moved {len(moved_names)} item(s) to transfer vault: {', '.join(moved_names[:5])}")
             self.refresh_transfer_vault()
         except Exception as error:
             self.show_error("Transfer vault export failed", error)

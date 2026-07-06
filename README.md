@@ -82,7 +82,7 @@ Use `--debug-risky-arrays` only when intentionally testing free-craft style arra
 
 See [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) for the latest beta fix notes.
 
-Recent runtime fixes in `v0.1.6-beta`:
+Recent runtime fixes in `v0.1.7-beta`:
 
 - Skinning yield now increases carcass recipe output counts instead of touching `D_ToolDamage.Skinning_Efficiency`, which could make carcasses deplete too quickly.
 - Baseline `0` values now remain `0` during multiplier math, preventing disabled/sentinel timers from becoming one-second timers.
@@ -93,6 +93,11 @@ Recent runtime fixes in `v0.1.6-beta`:
 - Transfer Vault restore now performs slot safety checks before writing: no overwrite, no duplicate explicit slots, no out-of-range slots, and no restore when known capacity has no open slot.
 - Transfer Vault now has an inventory dropdown and shows filtered item names and amounts for the selected inventory.
 - Transfer Vault inventory labels now resolve deployable row names and player/mount recorder inventories instead of showing generated actor IDs.
+- Transfer Vault item rows now have persistent checkbox-style selection that survives inventory dropdown changes.
+- Transfer Vault player inventory labels now use prospect/local character names when the save exposes `PlayerID` and `ChrSlot`.
+- Transfer Vault now works one exposed inventory at a time, with no all-inventories working view.
+- Internal attachment/ammo/prospect-manager inventories are hidden from the dropdown.
+- Same-name containers are separated with unique suffixes, such as `Wood Cupboard #11374`.
 
 Some settings are table-backed rather than direct live-player writes. Health, stamina, carry capacity, movement speed, and regen mutate `D_CharacterStartingStats` grants, so the game may recalculate visible values only after session load, spawn, respawn, healing, or other stat refresh behavior. Air control is applied directly to loaded movement components and should be more immediately visible.
 
@@ -116,7 +121,7 @@ The `Transfer Vault` tab is an offline shared stash for local players and worlds
 - Scans all local `%LOCALAPPDATA%\Icarus\Saved\PlayerData\<SteamID>` folders.
 - Detects prospect members from prospect save metadata.
 - Detects compressed live-world prospect inventory blobs and lists decoded item row names read-only.
-- Provides an inventory dropdown for browsing each detected inventory with clean deployable/player/mount/attachment names, item names, and amounts.
+- Provides an inventory dropdown for browsing one exposed inventory at a time with clean deployable/player/mount names, item names, amounts, and persistent checked row state.
 - Moves verified JSON-backed items into `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\transfer_vault\vault.json`.
 - Uses an exclusive `vault.lock` file so two vault operations cannot run at the same time.
 - Writes a transaction ledger to `transfer_vault\ledger.jsonl`.
