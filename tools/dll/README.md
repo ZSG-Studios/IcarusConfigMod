@@ -57,3 +57,13 @@ python tools\scripts\install_runtime.py --debug-validation --debug-log-each
 ```
 
 Add `--debug-risky-arrays` only when deliberately testing array-clearing behavior such as free craft.
+
+## Runtime Safety Notes
+
+- `skinning_yield` is intentionally applied to carcass processor output counts, not `D_ToolDamage.Skinning_Efficiency`. Touching skinning tool damage can make carcass durability deplete faster instead of producing more loot.
+- Generic processor recipe array edits skip carcass recipe rows.
+- Free craft clears `Inputs` and `QueryInputs` only. It does not clear `ResourceInputs` because that path can affect live resource consumption.
+- Numeric mutation preserves baseline `0` values. This prevents disabled/sentinel timers from being clamped into active one-second timers.
+- Stack and container slot mutations are clamped so runtime validation cannot shrink storage below the vanilla baseline.
+
+Health, stamina, carry capacity, movement speed, and regen are currently applied through `D_CharacterStartingStats` stat grants. These are table-backed values, not direct live pawn writes, so visible in-game values may depend on when Icarus rebuilds the active character stats.

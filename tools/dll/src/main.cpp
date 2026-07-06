@@ -172,6 +172,14 @@ struct ArrayRangeGroupRule {
     std::vector<const char*> exclude_contains{};
 };
 
+struct CarcassOutputYieldRule {
+    const char* key;
+    const char* table_stem;
+    const char* array_field;
+    const char* numeric_field;
+    double minimum{1.0};
+};
+
 struct StatArrayRule {
     const char* key;
     const char* table_stem;
@@ -250,6 +258,10 @@ const ArrayRangeGroupRule kArrayRangeGroupRules[] = {
     {"missionCurrencyGroup", "D_FactionMissions", "CurrencyRewarded", "Amount", {{1, 25}, {26, 50}, {51, 100}, {101, 250}, {251, 500}, {501, 1000}, {1001, 1000000}}, 0.0},
 };
 
+const CarcassOutputYieldRule kCarcassOutputYieldRules[] = {
+    {"skinning_yield", "D_ProcessorRecipes", "Outputs", "Count", 1.0},
+};
+
 const StatArrayRule kStatArrayRules[] = {
     {"health", "D_CharacterStartingStats", "StatsGranted", {"BaseMaximumHealth_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
     {"stamina", "D_CharacterStartingStats", "StatsGranted", {"BaseMaximumStamina_+"}, NumericMode::Multiply, NumericResult::Nearest, 1.0},
@@ -297,6 +309,20 @@ const UnsupportedSettingRule kUnsupportedMultiplierRules[] = {
 bool array_range_group_mutation_enabled(const ArrayRangeGroupRule& rule) {
     const auto key = std::string_view(rule.key_prefix);
     return key == "missionCurrencyGroup" || key == "recipeOutputGroup";
+}
+
+bool is_storage_capacity_group(std::string_view key_prefix) {
+    return key_prefix == "stackGroup" || key_prefix == "slotGroup";
+}
+
+bool is_carcass_processor_recipe_row(std::string_view row_name) {
+    return row_name.rfind("Carcass_", 0) == 0
+        || row_name.find("_Carcass_") != std::string_view::npos
+        || row_name.find("AnimalCarcass") != std::string_view::npos;
+}
+
+bool should_skip_processor_recipe_row(std::string_view table_name, std::string_view row_name) {
+    return table_name.find("D_ProcessorRecipes") != std::string_view::npos && is_carcass_processor_recipe_row(row_name);
 }
 
 double clamped_multiplier(double value, double minimum, double maximum) {
@@ -543,6 +569,10 @@ bool excluded_row(
 }
 
 double adjusted_numeric(double baseline, double multiplier, NumericMode mode, NumericResult result, double minimum) {
+    if (baseline == 0.0) {
+        return 0.0;
+    }
+
     double value = mode == NumericMode::Divide
         ? (multiplier == 0.0 ? baseline : baseline / multiplier)
         : baseline * multiplier;
@@ -918,6 +948,11 @@ private:
                 }
             }
         }
+        for (const auto& rule : kCarcassOutputYieldRules) {
+            const double value = debug_multiplier(config.get_number("table_multipliers", rule.key, 1.0), debug);
+            auto& status = ensure_setting_status(statuses, "table_multipliers", rule.key, value, !is_vanilla_multiplier(value));
+            status.targets_seen += data_tables_seen;
+        }
         for (const auto& rule : kStatArrayRules) {
             const double value = debug_multiplier(config.get_number("table_multipliers", rule.key, 1.0), debug);
             auto& status = ensure_setting_status(statuses, "table_multipliers", rule.key, value, !is_vanilla_multiplier(value));
@@ -1119,6 +1154,9 @@ private:
 
             std::vector<RC::Unreal::UObject*> data_tables;
             RC::Unreal::UObjectGlobals::FindAllOf(STR("DataTable"), data_tables);
+            if (debug.enabled) {
+                log_body_diagnostics(data_tables, phase);
+            }
 
             std::size_t tables_seen = data_tables.size();
             std::vector<RC::Unreal::UObject*> curve_objects_for_validation;
@@ -1160,6 +1198,12 @@ private:
                     ++status.targets_matched;
                     const double multiplier = clamped_multiplier(debug_multiplier(config.get_number(rule.section, rule.key, 1.0), debug), 0.0, 1000000.0);
                     if (is_vanilla_multiplier(multiplier)) {
+                        continue;
+                    }
+                    if (std::string_view(rule.key) == "skinning_yield" && table_stem_matches(table_name, "D_ToolDamage")) {
+                        ++status.skipped;
+                        status.reason = "skinning_yield_uses_carcass_outputs";
+                        append_log(root_, "SAFETY_SKIP SkinningEfficiencyToolDamage Table=" + table_name + " Reason=would_speed_carcass_depletion");
                         continue;
                     }
                     std::size_t rule_applied = 0;
@@ -1263,6 +1307,26 @@ private:
                     status.verify_failed += mutation_math_failures_ - verify_failures_before;
                 }
 
+                for (const auto& rule : kCarcassOutputYieldRules) {
+                    if (!table_stem_matches(table_name, rule.table_stem)) {
+                        continue;
+                    }
+                    matched_this_table = true;
+                    auto& status = setting_statuses[setting_id("table_multipliers", rule.key)];
+                    ++status.targets_matched;
+                    const double multiplier = clamped_multiplier(debug_multiplier(config.get_number("table_multipliers", rule.key, 1.0), debug), 0.0, 1000000.0);
+                    if (is_vanilla_multiplier(multiplier)) {
+                        continue;
+                    }
+                    const auto verify_failures_before = mutation_math_failures_;
+                    const auto applied = apply_carcass_output_yield(table, rule, multiplier);
+                    array_fields_applied += applied.first;
+                    array_fields_missing += applied.second;
+                    status.applied += applied.first;
+                    status.missing += applied.second;
+                    status.verify_failed += mutation_math_failures_ - verify_failures_before;
+                }
+
                 for (const auto& rule : kBoolTableRules) {
                     if (!table_stem_matches(table_name, rule.table_stem)) {
                         continue;
@@ -1326,9 +1390,9 @@ private:
                         const auto verify_failures_before = mutation_math_failures_;
                         const auto inputs = set_array_numeric_field(table, "Inputs", "Count", 0.0, true);
                         const auto query_inputs = set_array_numeric_field(table, "QueryInputs", "Count", 0.0, true);
-                        const auto resource_inputs = set_array_numeric_field(table, "ResourceInputs", "Count", 0.0, false);
-                        const std::size_t cleared = inputs.first + query_inputs.first + resource_inputs.first;
-                        const std::size_t missing = cleared > 0 ? 0 : inputs.second + query_inputs.second + resource_inputs.second;
+                        const std::size_t cleared = inputs.first + query_inputs.first;
+                        const std::size_t missing = cleared > 0 ? 0 : inputs.second + query_inputs.second;
+                        append_log(root_, "SAFETY_SKIP FreeCraftResourceInputs Table=" + table_name + " Reason=resource_inputs_can_drive_live_consumption");
                         free_craft_fields_applied += cleared;
                         free_craft_fields_missing += missing;
                         array_fields_applied += cleared;
@@ -1694,6 +1758,138 @@ private:
         }
     }
 
+    bool is_body_diagnostic_table(std::string_view table_name) const {
+        return table_stem_matches(table_name, "D_Hitable")
+            || table_stem_matches(table_name, "D_ItemsStatic")
+            || table_stem_matches(table_name, "D_ToolDamage")
+            || table_stem_matches(table_name, "D_Decayable")
+            || table_stem_matches(table_name, "D_Resource");
+    }
+
+    bool is_body_diagnostic_row(std::string_view row_name, RC::Unreal::UStruct* row_struct, const void* row) {
+        static constexpr std::string_view tokens[] = {
+            "AnimalCarcass",
+            "Carcass",
+            "Corpse",
+            "Dead",
+            "Skinning",
+            "Hitable_AnimalCarcass",
+            "BP_Hitable_AnimalCarcass"
+        };
+        for (const auto token : tokens) {
+            if (contains_text(row_name, token) || exported_struct_contains(row_struct, row, token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void log_body_diagnostics(const std::vector<RC::Unreal::UObject*>& data_tables, std::string_view phase) {
+        if (body_diagnostics_logged_) {
+            return;
+        }
+        body_diagnostics_logged_ = true;
+
+        try {
+            std::size_t tables_matched = 0;
+            std::size_t rows_logged = 0;
+            for (RC::Unreal::UObject* table : data_tables) {
+                if (!table || !RC::Unreal::UObject::IsReal(table)) {
+                    continue;
+                }
+
+                const auto table_name = narrow_unreal(table->GetFullName());
+                if (contains_text(table_name, "_METATABLE") || !is_body_diagnostic_table(table_name)) {
+                    continue;
+                }
+                ++tables_matched;
+
+                const auto rows = get_table_rows(table, phase);
+                if (!rows || !rows->row_struct || !rows->row_map) {
+                    continue;
+                }
+
+                for (auto it = rows->row_map->CreateIterator(); it; ++it) {
+                    if (rows_logged >= 180) {
+                        break;
+                    }
+
+                    const auto row_name = narrow_unreal(it.Key().ToString());
+                    unsigned char* row = it.Value();
+                    if (!row || !is_body_diagnostic_row(row_name, rows->row_struct, row)) {
+                        continue;
+                    }
+
+                    append_log(
+                        root_,
+                        "BODY_DIAG Phase=" + std::string(phase)
+                            + " Table=" + table_name
+                            + " Row=" + row_name
+                            + " Values=" + truncate_for_log(body_diagnostic_values(rows->row_struct, row), 1800)
+                    );
+                    ++rows_logged;
+                }
+            }
+
+            append_log(
+                root_,
+                "BODY_DIAG_SUMMARY Phase=" + std::string(phase)
+                    + " TablesMatched=" + std::to_string(tables_matched)
+                    + " RowsLogged=" + std::to_string(rows_logged)
+            );
+        } catch (const std::exception& error) {
+            append_log(root_, std::string("ERROR: log_body_diagnostics exception: ") + error.what());
+        } catch (...) {
+            append_log(root_, "ERROR: unknown log_body_diagnostics exception.");
+        }
+    }
+
+    std::string body_diagnostic_values(RC::Unreal::UStruct* row_struct, const void* row) {
+        if (!row_struct || !row) {
+            return "<missing>";
+        }
+
+        std::ostringstream values;
+        std::size_t logged = 0;
+        for (auto* property : row_struct->ForEachPropertyInChain()) {
+            if (!property || logged >= 80) {
+                continue;
+            }
+
+            const auto property_name = narrow_unreal(property->GetName());
+            const auto exported = export_property_text(property, row);
+            const bool interesting =
+                contains_text(property_name, "Hitable")
+                || contains_text(property_name, "ToolDamage")
+                || contains_text(property_name, "Decay")
+                || contains_text(property_name, "Spoil")
+                || contains_text(property_name, "Resource")
+                || contains_text(property_name, "Health")
+                || contains_text(property_name, "Life")
+                || contains_text(property_name, "Lifetime")
+                || contains_text(property_name, "Despawn")
+                || contains_text(property_name, "Destroy")
+                || contains_text(property_name, "Skinning")
+                || contains_text(property_name, "Melee")
+                || contains_text(exported, "AnimalCarcass")
+                || contains_text(exported, "Carcass")
+                || contains_text(exported, "Corpse");
+            if (!interesting && !as_numeric_property(property)) {
+                continue;
+            }
+
+            if (logged != 0) {
+                values << ";";
+            }
+            values << property_name << "=" << truncate_for_log(exported, 180);
+            ++logged;
+        }
+        if (logged == 0) {
+            return "<no_interesting_properties>";
+        }
+        return values.str();
+    }
+
     struct TableRows {
         RC::Unreal::TMap<RC::Unreal::FName, unsigned char*>* row_map{};
         RC::Unreal::UScriptStruct* row_struct{};
@@ -1975,7 +2171,12 @@ private:
         std::size_t missing = 0;
         for (auto it = row_map->CreateIterator(); it; ++it) {
             const auto row_name = narrow_unreal(it.Key().ToString());
+            const auto table_name = narrow_unreal(table->GetFullName());
             if (!listed_row(row_name, rule.row_names) || excluded_row(row_name, {}, rule.exclude_suffixes)) {
+                continue;
+            }
+            if (should_skip_processor_recipe_row(table_name, row_name)) {
+                append_log(root_, "SAFETY_SKIP CarcassProcessorRecipe Table=" + table_name + " Row=" + row_name + " Setting=" + rule.key);
                 continue;
             }
             unsigned char* row = it.Value();
@@ -2031,7 +2232,12 @@ private:
             std::size_t missing = 0;
             for (auto it = row_map->CreateIterator(); it; ++it) {
                 const auto row_name = narrow_unreal(it.Key().ToString());
+                const auto table_name = narrow_unreal(table->GetFullName());
                 if (!listed_row(row_name, rule.row_names) || excluded_row(row_name, {}, rule.exclude_suffixes)) {
+                    continue;
+                }
+                if (should_skip_processor_recipe_row(table_name, row_name)) {
+                    append_log(root_, "SAFETY_SKIP CarcassProcessorRecipe Table=" + table_name + " Row=" + row_name + " Setting=" + rule.key);
                     continue;
                 }
                 unsigned char* row = it.Value();
@@ -2097,6 +2303,11 @@ private:
         std::size_t missing = 0;
         for (auto it = row_map->CreateIterator(); it; ++it) {
             const auto row_name = narrow_unreal(it.Key().ToString());
+            const auto table_name = narrow_unreal(table->GetFullName());
+            if (should_skip_processor_recipe_row(table_name, row_name)) {
+                append_log(root_, "SAFETY_SKIP CarcassProcessorRecipe Table=" + table_name + " Row=" + row_name + " Setting=" + rule.key);
+                continue;
+            }
             if (excluded_row(row_name, rule.exclude_contains)) {
                 continue;
             }
@@ -2734,6 +2945,11 @@ private:
         std::size_t missing = 0;
         for (auto it = row_map->CreateIterator(); it; ++it) {
             const auto row_name = narrow_unreal(it.Key().ToString());
+            const auto table_name = narrow_unreal(table->GetFullName());
+            if (should_skip_processor_recipe_row(table_name, row_name)) {
+                append_log(root_, "SAFETY_SKIP CarcassProcessorRecipe Table=" + table_name + " Row=" + row_name + " Setting=" + rule.key_prefix);
+                continue;
+            }
             if (excluded_row(row_name, rule.exclude_contains)) {
                 continue;
             }
@@ -2782,6 +2998,85 @@ private:
         return {applied, missing};
     }
 
+    std::pair<std::size_t, std::size_t> apply_carcass_output_yield(
+        RC::Unreal::UObject* table,
+        const CarcassOutputYieldRule& rule,
+        double multiplier
+    ) {
+        const auto rows = get_table_rows(table, "carcass_output_yield");
+        if (!rows) {
+            return {0, 1};
+        }
+
+        auto* row_map = rows->row_map;
+        auto* row_struct = rows->row_struct;
+        auto* array_property_base = find_struct_property_by_name(row_struct, rule.array_field);
+        auto* array_property = array_property_base ? RC::Unreal::CastField<RC::Unreal::FArrayProperty>(array_property_base) : nullptr;
+        auto* inner_struct_property = array_property ? RC::Unreal::CastField<RC::Unreal::FStructProperty>(array_property->GetInner()) : nullptr;
+        RC::Unreal::UScriptStruct* inner_struct = inner_struct_property ? inner_struct_property->GetStruct() : nullptr;
+        auto* numeric_property_base = inner_struct ? find_struct_property_by_name(inner_struct, rule.numeric_field) : nullptr;
+        auto* numeric_property = as_numeric_property(numeric_property_base);
+        if (!array_property || !inner_struct || !numeric_property) {
+            append_log(
+                root_,
+                "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
+                    + " Key=" + rule.key
+                    + " ArrayField=" + rule.array_field
+                    + " Field=" + rule.numeric_field
+                    + " PropertyClass=" + property_class_name(numeric_property_base)
+                    + " Reason=carcass_output_yield_schema"
+            );
+            return {0, 1};
+        }
+
+        std::size_t applied = 0;
+        std::size_t missing = 0;
+        for (auto it = row_map->CreateIterator(); it; ++it) {
+            const auto row_name = narrow_unreal(it.Key().ToString());
+            if (!is_carcass_processor_recipe_row(row_name)) {
+                continue;
+            }
+
+            unsigned char* row = it.Value();
+            void* array_ptr = row ? array_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row)) : nullptr;
+            if (!array_ptr) {
+                ++missing;
+                continue;
+            }
+
+            auto* array = static_cast<RC::Unreal::FScriptArray*>(array_ptr);
+            const int32_t element_size = array_property->GetInner()->GetElementSize();
+            const int32_t count = array ? array->Num() : 0;
+            for (int32_t index = 0; index < count; ++index) {
+                auto* element = static_cast<unsigned char*>(array->GetData()) + (index * element_size);
+                void* value_ptr = element ? numeric_property->ContainerPtrToValuePtr<void>(static_cast<void*>(element)) : nullptr;
+                if (!value_ptr) {
+                    ++missing;
+                    continue;
+                }
+
+                const double current = read_numeric_value(numeric_property, value_ptr);
+                const double baseline = numeric_baselines_.try_emplace(value_ptr, current).first->second;
+                const double adjusted = adjusted_numeric(baseline, multiplier, NumericMode::Multiply, NumericResult::Nearest, rule.minimum);
+                write_numeric_checked(
+                    numeric_property,
+                    value_ptr,
+                    adjusted,
+                    "table=" + narrow_unreal(table->GetFullName())
+                        + ";row=" + row_name
+                        + ";setting=" + rule.key
+                        + ";carcass_output=" + rule.array_field
+                        + ";index=" + std::to_string(index)
+                );
+                ++applied;
+            }
+        }
+        if (applied == 0) {
+            append_log(root_, "FIELD_MISS Table=" + narrow_unreal(table->GetFullName()) + " Key=" + rule.key + " Reason=no_carcass_outputs_found");
+        }
+        return {applied, applied > 0 ? 0 : missing + 1};
+    }
+
     std::pair<std::size_t, std::size_t> set_array_numeric_field(
         RC::Unreal::UObject* table,
         const char* array_field,
@@ -2818,6 +3113,11 @@ private:
         std::size_t missing = 0;
         for (auto it = row_map->CreateIterator(); it; ++it) {
             const auto row_name = narrow_unreal(it.Key().ToString());
+            const auto table_name = narrow_unreal(table->GetFullName());
+            if (should_skip_processor_recipe_row(table_name, row_name)) {
+                append_log(root_, "SAFETY_SKIP CarcassProcessorRecipe Table=" + table_name + " Row=" + row_name + " Setting=free_craft");
+                continue;
+            }
             unsigned char* row = it.Value();
             void* array_ptr = row ? array_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row)) : nullptr;
             if (!array_ptr) {
@@ -2912,7 +3212,18 @@ private:
             if (!matched_range) {
                 continue;
             }
-            const double adjusted = adjusted_numeric(baseline, multiplier, NumericMode::Multiply, NumericResult::Nearest, rule.minimum);
+            double adjusted = adjusted_numeric(baseline, multiplier, NumericMode::Multiply, NumericResult::Nearest, rule.minimum);
+            if (is_storage_capacity_group(rule.key_prefix) && adjusted < baseline) {
+                append_log(
+                    root_,
+                    "SAFETY_CLAMP StorageCapacityNoShrink Table=" + narrow_unreal(table->GetFullName())
+                        + " Row=" + row_name
+                        + " Group=" + rule.key_prefix
+                        + " Baseline=" + std::to_string(baseline)
+                        + " Requested=" + std::to_string(adjusted)
+                );
+                adjusted = baseline;
+            }
             write_numeric_checked(
                 numeric_property,
                 value_ptr,
@@ -2929,6 +3240,7 @@ private:
     bool hooks_registered_{false};
     bool begin_play_applied_{false};
     bool schema_diagnostics_logged_{false};
+    bool body_diagnostics_logged_{false};
     bool tables_applied_{false};
     ULONGLONG next_runtime_scan_ms_{0};
     ULONGLONG next_schema_diagnostic_ms_{0};

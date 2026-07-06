@@ -50,6 +50,14 @@ VALIDATION GreenLight ... GreenLight=YES
 Partial=0 Pending=0 Skipped=0 Unsupported=0 MissingFields=0
 ```
 
+## Beta Notes
+
+This build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, and zero-value timer math.
+
+Skinning yield is applied through carcass output counts instead of tool-damage skinning efficiency, which prevents the yield setting from making carcasses deplete too quickly.
+
+Some settings are table-backed and may not visibly update on an already-spawned character right away. Health, stamina, carry capacity, movement speed, and regen can depend on the game's stat recalculation, equipment, talents, buffs, current health, and session/spawn state. Fully restart Icarus and enter a session before judging runtime changes.
+
 ## Reset
 
 Open `IcarusConfigMod.exe` and use `Reset Installed Mod` from the console/actions area.

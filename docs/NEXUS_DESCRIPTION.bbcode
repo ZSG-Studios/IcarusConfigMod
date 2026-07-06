@@ -73,6 +73,18 @@ A clean pass should also show:
 
 If [b]GreenLight=NO[/b], check nearby [b]SETTING_STATUS[/b] lines to see which active setting needs attention.
 
+[heading]Current Beta Notes[/heading]
+[list]
+[*]This build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, and zero-value timer math.[/*]
+[*]Skinning yield now increases carcass output counts instead of changing [b]D_ToolDamage.Skinning_Efficiency[/b], which could make carcasses deplete too quickly.[/*]
+[*]Baseline 0 values now stay 0 during multiplier math, preventing disabled or sentinel timers from becoming one-second timers.[/*]
+[*]Free craft no longer clears [b]ResourceInputs[/b], avoiding live resource drain behavior.[/*]
+[*]Generic processor/material/free-craft array edits skip carcass processor rows.[/*]
+[*]Stack and container slot mutations are clamped so runtime validation cannot shrink storage below vanilla baseline.[/*]
+[/list]
+
+[b]Important:[/b] Some values are table-backed rather than direct live-player writes. Health, stamina, carry capacity, movement speed, and regen mutate [b]D_CharacterStartingStats[/b] stat grants. Icarus may combine those with equipment, talents, buffs, current health, and spawn/session state, so the visible HUD may not always look like a simple old value times multiplier immediately. Fully restart Icarus and enter a session before judging runtime changes.
+
 [heading]Important Safety Notes[/heading]
 [list]
 [*]The configurator automatically backs up saves before applying settings.[/*]
@@ -147,6 +159,7 @@ Open [b]IcarusConfigMod.exe[/b] and use [b]Reset Installed Mod[/b] from the cons
 [*]Premade_Configuration is the included balance preset.[/*]
 [*]Runtime validation happens after Icarus loads enough game data.[/*]
 [*]If you change settings while Icarus is running, fully restart the game before judging results.[/*]
+[*]A clean validation log proves the target table/runtime value changed as expected, but derived stats may be recalculated by the game before they are visible on the current character.[/*]
 [/list]
 
 [heading]Third-Party Credits[/heading]

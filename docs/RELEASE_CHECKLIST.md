@@ -8,6 +8,7 @@ Use this before uploading a beta package.
 - Run `python -m py_compile app\configurator.py tools\scripts\install_runtime.py tools\scripts\package_release.py tools\scripts\reset.py`.
 - Run `python tools\scripts\package_release.py`.
 - Confirm `dist\IcarusConfigMod.zip` was updated.
+- Confirm `docs\RELEASE_NOTES.md`, `README.md`, `docs\PLAYER_README.md`, and `docs\NEXUS_DESCRIPTION.bbcode` describe the current runtime behavior.
 - Confirm the player zip contains no `.bat`, `.ps1`, or player-side `.py` launch scripts.
 - Confirm the player zip does not contain PyInstaller `*.pkg`, `*.spec`, `_MEI*`, or `pyi-*` artifacts.
 - Confirm the staged player folder does not contain generated `backups`, `builds`, `runtime_mods`, `tools`, `configurator.log`, `user_settings.json`, or `Configuration_Mod/dlls`.
@@ -22,6 +23,7 @@ The player zip should include:
 - `main.dll`
 - `PLAYER_README.txt`
 - `README.md` copied from `docs/PLAYER_README.md`
+- `RELEASE_NOTES.txt` copied from `docs/RELEASE_NOTES.md`
 - `profiles/Premade_Configuration.json`
 - `Configuration_Mod/settings.ini`
 - `Configuration_Mod/runtime_config.json`
@@ -68,3 +70,5 @@ After installing and launching Icarus, inspect the runtime log for:
 - `Partial=0 Pending=0 Skipped=0 Unsupported=0 MissingFields=0`.
 - No active settings with `Result=unsupported`.
 - No active settings with `Result=partial`, `Result=pending`, or `Result=skipped`.
+- For carcass testing, confirm killed animals remain harvestable and `skinning_yield` applies through carcass output counts rather than `D_ToolDamage.Skinning_Efficiency`.
+- For health/speed testing, remember these are table-backed stat grants and may require session load, spawn, respawn, healing, or game stat refresh before the visible HUD/current pawn reflects the changed base values.

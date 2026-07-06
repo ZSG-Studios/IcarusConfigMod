@@ -76,6 +76,20 @@ python tools\scripts\install_runtime.py --debug-validation --debug-log-each
 
 Use `--debug-risky-arrays` only when intentionally testing free-craft style array clearing. The runtime log will include `VALIDATION DebugConfig`, `MATH_CHECK`, `MATH_CHECK_FAIL`, `SETTING_STATUS`, and `VALIDATION GreenLight` lines.
 
+## Current Beta Notes
+
+See [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) for the latest beta fix notes.
+
+Recent runtime fixes:
+
+- Skinning yield now increases carcass recipe output counts instead of touching `D_ToolDamage.Skinning_Efficiency`, which could make carcasses deplete too quickly.
+- Baseline `0` values now remain `0` during multiplier math, preventing disabled/sentinel timers from becoming one-second timers.
+- Free-craft no longer clears `ResourceInputs`, avoiding live resource drain behavior.
+- Generic recipe/material/free-craft array edits skip carcass processor rows.
+- Stack and container slot runtime mutation is clamped so it cannot shrink below the vanilla baseline.
+
+Some settings are table-backed rather than direct live-player writes. Health, stamina, carry capacity, movement speed, and regen mutate `D_CharacterStartingStats` grants, so the game may recalculate visible values only after session load, spawn, respawn, healing, or other stat refresh behavior. Air control is applied directly to loaded movement components and should be more immediately visible.
+
 ## Save Backups
 
 The configurator has a `Save Backups` tab for Icarus player/world saves. It backs up these save components when present:

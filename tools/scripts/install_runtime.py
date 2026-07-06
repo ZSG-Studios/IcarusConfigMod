@@ -403,7 +403,11 @@ def main() -> int:
     parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE, help="Profile JSON to package.")
     parser.add_argument("--debug-validation", action="store_true", help="Enable opt-in full supported-setting validation in generated settings.ini.")
     parser.add_argument("--debug-log-each", action="store_true", help="With --debug-validation, log each math check with default/expected/actual values.")
-    parser.add_argument("--debug-risky-arrays", action="store_true", help="With --debug-validation, include risky array-clearing edits such as free craft.")
+    parser.add_argument(
+        "--debug-risky-arrays",
+        action="store_true",
+        help="With --debug-validation, include array-backed recipe/inventory tests. Free craft leaves ResourceInputs untouched to avoid live resource drain.",
+    )
     args = parser.parse_args()
 
     try:

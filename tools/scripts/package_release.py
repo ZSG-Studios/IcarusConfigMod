@@ -138,6 +138,7 @@ def stage_release(package: Path, app_bundle: Path) -> Path:
         shutil.rmtree(DIST_DIR)
     shutil.copytree(app_bundle, DIST_DIR)
     copy_file(APP_DIR / "docs" / "PLAYER_README.md", DIST_DIR / "README.md")
+    copy_file(APP_DIR / "docs" / "RELEASE_NOTES.md", DIST_DIR / "RELEASE_NOTES.txt")
     copy_file(APP_DIR / "LICENSE", DIST_DIR / "LICENSE")
     shutil.copytree(SOURCE_PROFILES_DIR, DIST_DIR / "profiles")
     shutil.copytree(package, DIST_DIR / package.name, ignore=shutil.ignore_patterns("dlls"))
@@ -148,6 +149,7 @@ def stage_release(package: Path, app_bundle: Path) -> Path:
         "This player package ships a portable configurator and prebuilt UE4SS C++ DLL runtime.\n"
         "Applying configuration creates an automatic Icarus player/world save backup first.\n"
         "Use the Save Backups tab to create, list, open, and restore save backups.\n"
+        "Read RELEASE_NOTES.txt for current beta fixes and known runtime behavior.\n"
         "Close Icarus before creating or restoring save backups.\n"
         "No player-side Python install, build step, batch file, or PowerShell script is required.\n",
         encoding="utf-8",
