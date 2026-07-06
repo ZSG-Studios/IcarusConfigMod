@@ -1,6 +1,6 @@
 # Release Notes
 
-## Beta Runtime Fix Update
+## v0.1.1-beta - Runtime Fix Update
 
 This update focuses on runtime safety, validation accuracy, and release packaging cleanup.
 

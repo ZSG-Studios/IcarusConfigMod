@@ -52,7 +52,7 @@ Partial=0 Pending=0 Skipped=0 Unsupported=0 MissingFields=0
 
 ## Beta Notes
 
-This build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, and zero-value timer math.
+This `v0.1.1-beta` build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, and zero-value timer math.
 
 Skinning yield is applied through carcass output counts instead of tool-damage skinning efficiency, which prevents the yield setting from making carcasses deplete too quickly.
 
