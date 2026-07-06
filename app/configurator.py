@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import traceback
 import urllib.request
 import zipfile
@@ -23,7 +24,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "Icarus Balance Configurator"
-APP_VERSION = "0.1.7-beta"
+APP_VERSION = "0.1.8-beta"
 UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 RUNTIME_MOD_FOLDER = "Configuration_Mod"
 RUNTIME_INI_NAME = "settings.ini"
@@ -117,6 +118,16 @@ class DirectSettingSpec:
     field: str = ""
     minimum_result: int = 0
     currency: str = ""
+
+
+@dataclass(frozen=True)
+class ContainerSlotSpec:
+    key: str
+    label: str
+    row_tokens: tuple[str, ...]
+    description: str
+    default: str = "1"
+    choices: tuple[str, ...] = ("1", "1.25", "1.5", "2", "3", "5", "10")
 
 
 @dataclass(frozen=True)
@@ -271,6 +282,55 @@ DIRECT_SETTINGS: tuple[DirectSettingSpec, ...] = (
         "Multiplies Lucky Strike's native BaseChanceToMineVoxelInstantly stat in D_Talents.",
         "Talents/D_Talents.json", "talent_reward_stat_multiplier",
         row_name="Resources_Voxel_Instant", field='(Value="BaseChanceToMineVoxelInstantly_+%")',
+    ),
+)
+
+
+CONTAINER_SLOT_SETTINGS: tuple[ContainerSlotSpec, ...] = (
+    ContainerSlotSpec(
+        "wood_cupboard", "Wood Cupboard slots",
+        ("Wood_Cupboard", "WoodCupboard", "Wood Cupboard"),
+        "Per-container override for Wood Cupboard inventory slots. This targets matching D_InventoryInfo rows instead of all containers in the same vanilla slot range.",
+    ),
+    ContainerSlotSpec(
+        "storage_crate", "Storage Crate slots",
+        ("Storage_Crate", "StorageCrate", "Crate"),
+        "Per-container override for storage crate style inventory slots.",
+    ),
+    ContainerSlotSpec(
+        "large_storage_crate", "Large Storage Crate slots",
+        ("Large_Storage_Crate", "LargeStorageCrate", "Large_Crate", "LargeCrate"),
+        "Per-container override for large storage crate style inventory slots.",
+    ),
+    ContainerSlotSpec(
+        "ice_box", "Ice Box slots",
+        ("Ice_Box", "IceBox"),
+        "Per-container override for Ice Box inventory slots.",
+    ),
+    ContainerSlotSpec(
+        "refrigerator", "Refrigerator slots",
+        ("Refrigerator", "Fridge"),
+        "Per-container override for refrigerator style inventory slots.",
+    ),
+    ContainerSlotSpec(
+        "mortar_pestle", "Mortar and Pestle slots",
+        ("Mortar", "Pestle"),
+        "Per-container override for Mortar and Pestle inventory slots.",
+    ),
+    ContainerSlotSpec(
+        "crafting_bench", "Crafting Bench slots",
+        ("Crafting_Bench", "CraftingBench"),
+        "Per-container override for Crafting Bench inventory slots.",
+    ),
+    ContainerSlotSpec(
+        "fabricator", "Fabricator slots",
+        ("Fabricator",),
+        "Per-container override for Fabricator inventory slots.",
+    ),
+    ContainerSlotSpec(
+        "furnace", "Furnace slots",
+        ("Furnace",),
+        "Per-container override for furnace inventory slots, including matching upgraded furnace rows.",
     ),
 )
 
@@ -656,6 +716,10 @@ class Configurator(tk.Tk):
             spec.key: tk.StringVar(value=display_multiplier(spec.default) if is_direct_multiplier(spec) else spec.default)
             for spec in DIRECT_SETTINGS
         }
+        self.container_slot_vars = {
+            spec.key: tk.StringVar(value=display_multiplier(spec.default))
+            for spec in CONTAINER_SLOT_SETTINGS
+        }
         self.curve_vars = {spec.key: tk.StringVar(value=display_multiplier(1)) for spec in CURVE_SETTINGS}
         self.runtime_vars = {spec.key: tk.StringVar(value=display_multiplier(spec.default)) for spec in RUNTIME_SETTINGS}
         self.native_group_vars: dict[str, list[tk.StringVar]] = {
@@ -676,6 +740,9 @@ class Configurator(tk.Tk):
         self.vault_dir = self.state_dir / "transfer_vault"
         self.vault_path = self.vault_dir / "vault.json"
         self.vault_ledger_path = self.vault_dir / "ledger.jsonl"
+        self.live_bridge_dir = self.state_dir / "live_bridge"
+        self.live_bridge_status_path = self.live_bridge_dir / "status.json"
+        self.live_bridge_status_var = tk.StringVar(value="Live bridge not connected")
         self.vault_listbox: tk.Listbox | None = None
         self.vault_source_listbox: tk.Listbox | None = None
         self.vault_inventory_combo: ttk.Combobox | None = None
@@ -845,6 +912,20 @@ class Configurator(tk.Tk):
             parent.columnconfigure(0, weight=1)
             category_rows[spec.category] += 1
 
+        for spec in CONTAINER_SLOT_SETTINGS:
+            parent = category_content["Inventory"]
+            row = category_rows["Inventory"]
+            card = ttk.LabelFrame(parent, text=spec.label, style="Card.TLabelframe", padding=10)
+            card.grid(row=row, column=0, sticky="ew", pady=(0, 8))
+            ttk.Label(card, text=spec.description, wraplength=720, style="CardText.TLabel").grid(row=0, column=0, sticky="w")
+            combo = ttk.Combobox(card, textvariable=self.container_slot_vars[spec.key], values=multiplier_choices(spec.choices), width=10)
+            combo.grid(row=0, column=1, sticky="e", padx=(16, 0))
+            combo.bind("<<ComboboxSelected>>", lambda _event: self.update_summary())
+            combo.bind("<FocusOut>", lambda _event: self.update_summary())
+            card.columnconfigure(0, weight=1)
+            parent.columnconfigure(0, weight=1)
+            category_rows["Inventory"] += 1
+
         for spec in CURVE_SETTINGS:
             parent = category_content[spec.category]
             row = category_rows[spec.category]
@@ -899,6 +980,8 @@ class Configurator(tk.Tk):
                 variable.trace_add("write", lambda *_args: self.update_summary())
         for variable in self.direct_vars.values():
             variable.trace_add("write", lambda *_args: self.update_summary())
+        for variable in self.container_slot_vars.values():
+            variable.trace_add("write", lambda *_args: self.update_summary())
         for variable in self.curve_vars.values():
             variable.trace_add("write", lambda *_args: self.update_summary())
         for variable in self.runtime_vars.values():
@@ -943,48 +1026,25 @@ class Configurator(tk.Tk):
 
     def add_transfer_vault_tab(self, notebook: ttk.Notebook) -> None:
         outer = ttk.Frame(notebook, padding=10, style="App.TFrame")
-        notebook.add(outer, text="Transfer Vault")
+        notebook.add(outer, text="Live Vault")
 
         actions = ttk.Frame(outer, style="App.TFrame")
         actions.pack(fill=tk.X, pady=(0, 8))
-        ttk.Button(actions, text="Scan Saves", style="Primary.TButton", command=self.refresh_transfer_vault).pack(side=tk.LEFT)
-        ttk.Button(actions, text="Move Checked To Vault", style="Soft.TButton", command=self.vault_export_selected).pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Button(actions, text="Restore Vault Item", style="Soft.TButton", command=self.vault_import_selected).pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Button(actions, text="Open Vault Folder", style="Soft.TButton", command=self.open_transfer_vault_folder).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(actions, text="Connect Live", style="Primary.TButton", command=self.refresh_live_bridge_status).pack(side=tk.LEFT)
+        ttk.Button(actions, text="Open Live Bridge", style="Soft.TButton", command=self.open_live_bridge_folder).pack(side=tk.LEFT, padx=(6, 0))
 
-        ttk.Label(outer, textvariable=self.vault_summary_var, style="Hud.TLabel").pack(anchor=tk.W, pady=(0, 8))
+        ttk.Label(outer, textvariable=self.live_bridge_status_var, style="Hud.TLabel").pack(anchor=tk.W, pady=(0, 8))
         ttk.Label(
             outer,
-            text="Offline shared stash for all local players. Pick an inventory to view its items and amounts. JSON inventory items can be moved now; live world inventory items are view-only until the binary inventory writer is verified.",
+            text="Live Vault is the active direction for item transfer. The configurator connects to the UE4SS runtime DLL and only exposes live capabilities reported by the running game bridge. Offline shared-stash save editing is no longer exposed as the main vault workflow.",
             style="CardText.TLabel",
             wraplength=980,
         ).pack(anchor=tk.W, pady=(0, 8))
 
-        selector = ttk.Frame(outer, style="App.TFrame")
-        selector.pack(fill=tk.X, pady=(0, 8))
-        ttk.Label(selector, text="Restore target:", style="Hud.TLabel").pack(side=tk.LEFT)
-        self.vault_target_combo = ttk.Combobox(selector, textvariable=self.vault_target_var, state="readonly", width=72, style="Profile.TCombobox")
-        self.vault_target_combo.pack(side=tk.LEFT, padx=(6, 0), fill=tk.X, expand=True)
-
-        columns = ttk.Frame(outer, style="App.TFrame")
-        columns.pack(fill=tk.BOTH, expand=True)
-
-        left = ttk.LabelFrame(columns, text="Detected Player/World Items", style="Card.TLabelframe", padding=8)
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
-        inventory_selector = ttk.Frame(left, style="Panel.TFrame")
-        inventory_selector.pack(fill=tk.X, pady=(0, 6))
-        ttk.Label(inventory_selector, text="Inventory:", style="CardText.TLabel").pack(side=tk.LEFT)
-        self.vault_inventory_combo = ttk.Combobox(
-            inventory_selector,
-            textvariable=self.vault_inventory_var,
-            state="readonly",
-            width=52,
-            style="Profile.TCombobox",
-        )
-        self.vault_inventory_combo.pack(side=tk.LEFT, padx=(6, 0), fill=tk.X, expand=True)
-        self.vault_inventory_combo.bind("<<ComboboxSelected>>", lambda _event: self.refresh_vault_source_list())
+        live = ttk.LabelFrame(outer, text="Runtime Inventory Bridge", style="Card.TLabelframe", padding=8)
+        live.pack(fill=tk.BOTH, expand=True)
         self.vault_source_listbox = tk.Listbox(
-            left,
+            live,
             height=18,
             background="#050a0d",
             foreground=UI_TEXT,
@@ -995,33 +1055,14 @@ class Configurator(tk.Tk):
             activestyle="none",
             font=("Consolas", 9),
         )
-        source_scroll = ttk.Scrollbar(left, orient=tk.VERTICAL, command=self.vault_source_listbox.yview)
+        source_scroll = ttk.Scrollbar(live, orient=tk.VERTICAL, command=self.vault_source_listbox.yview)
         self.vault_source_listbox.configure(yscrollcommand=source_scroll.set)
         self.vault_source_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.vault_source_listbox.bind("<ButtonRelease-1>", self.toggle_vault_source_check)
-        self.vault_source_listbox.bind("<space>", self.toggle_vault_source_check)
         source_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        right = ttk.LabelFrame(columns, text="Shared Transfer Vault", style="Card.TLabelframe", padding=8)
-        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
-        self.vault_listbox = tk.Listbox(
-            right,
-            height=18,
-            background="#050a0d",
-            foreground=UI_TEXT,
-            selectbackground=UI_TEAL_DARK,
-            selectforeground=UI_TEXT,
-            relief=tk.FLAT,
-            borderwidth=0,
-            activestyle="none",
-            font=("Consolas", 9),
-        )
-        vault_scroll = ttk.Scrollbar(right, orient=tk.VERTICAL, command=self.vault_listbox.yview)
-        self.vault_listbox.configure(yscrollcommand=vault_scroll.set)
-        self.vault_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        vault_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.refresh_transfer_vault()
+        self.vault_source_listbox.insert(tk.END, "Connect Live to check the in-game UE4SS bridge.")
+        self.vault_source_listbox.insert(tk.END, "Live inventory snapshot/move commands stay guarded until DLL object reads/writes are verified.")
+        self.vault_source_listbox.insert(tk.END, "Offline save-vault move/restore is intentionally not exposed here.")
+        self.refresh_live_bridge_status(silent=True)
 
     def add_group_card(self, parent: ttk.Frame, rows: dict[str, int], group: NativeGroupSpec) -> None:
         row = rows[group.category]
@@ -1105,6 +1146,9 @@ class Configurator(tk.Tk):
 
     def direct_values(self) -> dict[str, Decimal]:
         return {spec.key: parse_direct_value(self.direct_vars[spec.key].get(), spec) for spec in DIRECT_SETTINGS}
+
+    def container_slot_values(self) -> dict[str, Decimal]:
+        return {spec.key: parse_multiplier(self.container_slot_vars[spec.key].get()) for spec in CONTAINER_SLOT_SETTINGS}
 
     def curve_values(self) -> dict[str, Decimal]:
         if not CURVE_RUNTIME_ENABLED:
@@ -1240,6 +1284,82 @@ class Configurator(tk.Tk):
                 if len(columns) >= 2 and columns[0].lower() == image_name.lower():
                     found.append(f"{columns[0]} pid={columns[1]}")
         return found
+
+    def read_live_bridge_status(self) -> dict[str, Any] | None:
+        if not self.live_bridge_status_path.is_file():
+            return None
+        try:
+            data = json.loads(self.live_bridge_status_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+        return data if isinstance(data, dict) else None
+
+    def refresh_live_bridge_status(self, silent: bool = False) -> None:
+        status = self.read_live_bridge_status()
+        processes = self.running_icarus_processes()
+        def set_live_lines(lines: list[str]) -> None:
+            if self.vault_source_listbox is not None:
+                self.vault_source_listbox.delete(0, tk.END)
+                for line in lines:
+                    self.vault_source_listbox.insert(tk.END, line)
+
+        if status is None:
+            process_note = f" Icarus running: {', '.join(processes)}." if processes else ""
+            self.live_bridge_status_var.set(
+                "Live bridge: no runtime heartbeat found. Install/apply the mod, start Icarus, and enter a session."
+                + process_note
+            )
+            set_live_lines(
+                [
+                    "Live bridge heartbeat not found.",
+                    "Install/apply the mod, start Icarus, and enter a loaded session.",
+                    "Offline save-vault move/restore is not exposed in this build.",
+                ]
+            )
+            if not silent:
+                self.status_var.set("Live bridge heartbeat was not found.")
+            return
+
+        timestamp = status.get("timestampUnix")
+        try:
+            age = max(0, int(time.time() - float(timestamp)))
+        except Exception:
+            age = 999999
+        fresh = age <= 10 and str(status.get("state", "")).casefold() == "running"
+        capabilities = status.get("capabilities", {})
+        inventory_read = bool(status.get("inventoryRead")) or (isinstance(capabilities, dict) and bool(capabilities.get("inventorySnapshot")))
+        inventory_write = bool(status.get("inventoryWrite")) or (isinstance(capabilities, dict) and bool(capabilities.get("moveItem")))
+        state = "connected" if fresh else f"stale ({age}s old)"
+        self.live_bridge_status_var.set(
+            "Live bridge: "
+            + state
+            + f" | pid={status.get('pid', 'unknown')}"
+            + f" | inventory read={'yes' if inventory_read else 'guarded'}"
+            + f" | inventory write={'yes' if inventory_write else 'guarded'}"
+        )
+        message = str(status.get("message") or "")
+        set_live_lines(
+            [
+                f"State: {state}",
+                f"Runtime PID: {status.get('pid', 'unknown')}",
+                f"Mod: {status.get('modName', 'Configuration_Mod')}",
+                f"Inventory snapshot: {'enabled' if inventory_read else 'guarded'}",
+                f"Slot-safe live move: {'enabled' if inventory_write else 'guarded'}",
+                f"Heartbeat: {self.live_bridge_status_path}",
+                message or "Live bridge heartbeat connected.",
+            ]
+        )
+        if not silent:
+            self.status_var.set(
+                "Live bridge connected." if fresh else "Live bridge status exists but is stale; make sure Icarus is still running with the installed DLL."
+            )
+
+    def open_live_bridge_folder(self) -> None:
+        try:
+            self.live_bridge_dir.mkdir(parents=True, exist_ok=True)
+            os.startfile(self.live_bridge_dir)
+        except Exception as error:
+            self.show_error("Open live bridge folder failed", error)
 
     def runtime_health_report(self, win64_dir: Path, runtime_mod: Path) -> str:
         lines: list[str] = []
@@ -1685,6 +1805,7 @@ class Configurator(tk.Tk):
     def exposed_transfer_inventory(self, label: str, kind: str = "") -> bool:
         text = label.casefold()
         hidden_terms = (
+            "loadout",
             "attachment",
             "ammoslot",
             "ammo slot",
@@ -1881,40 +2002,6 @@ class Configurator(tk.Tk):
                     )
         return sources, target
 
-    def scan_loadout_sources(self, steam_dir: Path) -> list[dict[str, Any]]:
-        sources: list[dict[str, Any]] = []
-        path = steam_dir / "Loadout" / "Loadouts.json"
-        data = self.read_json_file(path, {})
-        loadouts = data.get("Loadouts", []) if isinstance(data, dict) else []
-        if not isinstance(loadouts, list):
-            return sources
-        for loadout_index, loadout in enumerate(loadouts):
-            if not isinstance(loadout, dict):
-                continue
-            items = loadout.get("MetaItems", [])
-            if not isinstance(items, list):
-                continue
-            for item_index, item in enumerate(items):
-                if isinstance(item, dict):
-                    amount = self.item_stack_value(item)
-                    sources.append(
-                        {
-                            "transferable": True,
-                            "kind": "loadout_meta_item",
-                            "path": str(path),
-                            "steam_id": steam_dir.name,
-                            "loadout_index": loadout_index,
-                            "index": item_index,
-                            "item": item,
-                            "inventory_key": f"loadout:{path}:{loadout_index}",
-                            "inventory_label": f"{steam_dir.name} - Loadout {loadout_index}",
-                            "display_name": self.item_display_name(item),
-                            "display_amount": amount,
-                            "label": f"{self.item_display_name(item)} x{amount}",
-                        }
-                    )
-        return sources
-
     def prospect_blob_summary(self, prospect_path: Path) -> tuple[bool, int, int]:
         try:
             data = self.read_json_file(prospect_path, {})
@@ -2049,6 +2136,25 @@ class Configurator(tk.Tk):
         )
         return name
 
+    def blob_mount_name(self, data: bytes, actor_start: int, inventory_start: int) -> str | None:
+        for key in (
+            b"MountName\x00",
+            b"CreatureName\x00",
+            b"CharacterName\x00",
+            b"DisplayName\x00",
+            b"Name\x00",
+            b"StaticDataRowName\x00",
+            b"CreatureDataRowName\x00",
+            b"MountDataRowName\x00",
+        ):
+            value, _pos = self.unreal_str_property_after_key_limited(data, key, actor_start, inventory_start)
+            if value and value != "None":
+                return self.clean_inventory_name(value, "Mount")
+            value, _pos = self.unreal_name_property_after_key_limited(data, key, actor_start, inventory_start)
+            if value and value != "None":
+                return self.clean_inventory_name(value, "Mount")
+        return None
+
     def generated_actor_suffix(self, actor_name: str) -> str:
         match = re.search(r"(?:GEN_|GENERATED_)(\d+)", actor_name)
         if match:
@@ -2071,6 +2177,12 @@ class Configurator(tk.Tk):
         suffix = self.generated_actor_suffix(actor_name)
         suffix_text = f" {suffix}" if suffix else ""
         if b"IcarusMountCharacterRecorderComponent" in chunk:
+            mount_name = self.blob_mount_name(data, actor_start, inventory_start)
+            if mount_name:
+                return f"{mount_name} Mount Inventory{suffix_text}"
+            actor_label = self.clean_inventory_name(actor_name, "")
+            if actor_label:
+                return f"{actor_label} Mount Inventory{suffix_text}"
             return f"Mount Inventory{suffix_text}"
         if b"PlayerStateRecorderComponent" in chunk or b"PlayerRecorderComponent" in chunk:
             player_id, _player_pos = self.unreal_str_property_after_key_limited(data, b"PlayerID\x00", actor_start, inventory_start)
@@ -2127,13 +2239,12 @@ class Configurator(tk.Tk):
             if row_name and row_name != "None":
                 actor_name = self.nearest_blob_actor_name(decompressed, item_pos)
                 inventory_name = self.blob_inventory_display_name(decompressed, item_pos, actor_name, player_names)
-                amount = self.unreal_int_property_after_key(decompressed, b"Value\x00", item_pos, item_end - item_pos)
                 items.append(
                     {
                         "row_name": row_name,
                         "actor_name": actor_name,
                         "inventory_name": inventory_name,
-                        "amount": amount if amount is not None and amount > 0 else 1,
+                        "amount": 1,
                         "offset": item_pos,
                     }
                 )
@@ -2227,7 +2338,6 @@ class Configurator(tk.Tk):
             meta_sources, target = self.scan_meta_inventory_sources(steam_dir)
             sources.extend(meta_sources)
             targets.append(target)
-            sources.extend(self.scan_loadout_sources(steam_dir))
             sources.extend(self.scan_prospect_sources(steam_dir))
         return sources, targets
 
@@ -2256,7 +2366,7 @@ class Configurator(tk.Tk):
                 and self.exposed_transfer_inventory(label, kind)
             ):
                 labels.append(label)
-        return labels
+        return sorted(labels, key=lambda value: value.casefold())
 
     def filtered_vault_sources(self) -> list[dict[str, Any]]:
         selected = self.vault_inventory_var.get()
@@ -2284,7 +2394,8 @@ class Configurator(tk.Tk):
                 if not name:
                     name = source.get("label", "Unknown Item")
                 amount = source.get("display_amount", 1)
-                self.vault_source_listbox.insert(tk.END, f"{checked} {prefix} | {inventory} | {name} x{amount}")
+                amount_text = f"x{amount}" if source.get("transferable") else "slot"
+                self.vault_source_listbox.insert(tk.END, f"{checked} {prefix} | {inventory} | {name} {amount_text}")
 
     def toggle_vault_source_check(self, event: tk.Event | None = None) -> str | None:
         if self.vault_source_listbox is None:
@@ -2364,182 +2475,6 @@ class Configurator(tk.Tk):
         except Exception as error:
             self.show_error("Transfer vault scan failed", error)
 
-    def selected_vault_source(self) -> dict[str, Any]:
-        if self.vault_source_listbox is None:
-            raise RuntimeError("Transfer source list is not available")
-        selection = self.vault_source_listbox.curselection()
-        if not selection:
-            raise RuntimeError("Select a source item first")
-        source = self.vault_sources[int(selection[0])]
-        if not source.get("transferable"):
-            raise RuntimeError("That entry is scan-only. Live prospect blob item movement needs the verified binary inventory writer first.")
-        return source
-
-    def selected_vault_sources_for_export(self) -> list[dict[str, Any]]:
-        checked_sources = [
-            source for source in self.vault_all_sources
-            if self.vault_source_id(source) in self.vault_checked_source_ids
-        ]
-        if not checked_sources:
-            return [self.selected_vault_source()]
-        blocked = [source for source in checked_sources if not source.get("transferable")]
-        if blocked:
-            raise RuntimeError(
-                "Checked items include view-only live prospect entries. Uncheck VIEW rows before moving items to the vault."
-            )
-        return sorted(
-            checked_sources,
-            key=lambda source: (
-                str(source.get("path", "")),
-                int(source.get("loadout_index", -1) if str(source.get("loadout_index", "-1")).lstrip("-").isdigit() else -1),
-                int(source.get("index", -1) if str(source.get("index", "-1")).lstrip("-").isdigit() else -1),
-            ),
-            reverse=True,
-        )
-
-    def selected_vault_item(self) -> dict[str, Any]:
-        if self.vault_listbox is None:
-            raise RuntimeError("Vault item list is not available")
-        selection = self.vault_listbox.curselection()
-        if not selection:
-            raise RuntimeError("Select a vault item first")
-        return self.vault_items[int(selection[0])]
-
-    def selected_vault_target(self) -> dict[str, Any]:
-        label = self.vault_target_var.get()
-        for target in self.vault_targets:
-            if target.get("label") == label:
-                return target
-        raise RuntimeError("Select a restore target first")
-
-    def remove_source_item(self, source: dict[str, Any]) -> dict[str, Any]:
-        path = Path(source["path"])
-        data = self.read_json_file(path, {})
-        if source["kind"] == "meta_inventory":
-            items = data.get("Items", [])
-            index = int(source["index"])
-            if not isinstance(items, list) or index >= len(items):
-                raise RuntimeError("Source inventory changed. Rescan before moving.")
-            item = items.pop(index)
-            self.write_json_file(path, data)
-            return item
-        if source["kind"] == "loadout_meta_item":
-            loadouts = data.get("Loadouts", [])
-            loadout_index = int(source["loadout_index"])
-            item_index = int(source["index"])
-            items = loadouts[loadout_index].get("MetaItems", [])
-            if not isinstance(items, list) or item_index >= len(items):
-                raise RuntimeError("Source loadout changed. Rescan before moving.")
-            item = items.pop(item_index)
-            self.write_json_file(path, data)
-            return item
-        raise RuntimeError(f"Unsupported source kind: {source['kind']}")
-
-    def vault_export_selected(self) -> None:
-        lock = None
-        try:
-            processes = self.running_icarus_processes()
-            if processes:
-                raise RuntimeError("Close Icarus before moving items into the transfer vault. Running processes: " + ", ".join(processes))
-            sources = self.selected_vault_sources_for_export()
-            item_word = "item" if len(sources) == 1 else "items"
-            if not messagebox.askyesno(
-                APP_NAME,
-                f"Move {len(sources)} checked {item_word} into the shared transfer vault?\n\n"
-                "The app will create a save backup first, remove the item(s) from source JSON inventory, and write ledger entries.",
-                parent=self,
-            ):
-                return
-            lock = self.acquire_vault_lock()
-            self.create_save_backup("pre_vault_export", silent=True)
-            vault = self.load_vault()
-            moved_names: list[str] = []
-            for source in sources:
-                item = self.remove_source_item(source)
-                vault_item = {
-                    "id": uuid4().hex,
-                    "stored": datetime.now().isoformat(timespec="seconds"),
-                    "source_label": source.get("label", ""),
-                    "source": {key: value for key, value in source.items() if key != "item"},
-                    "item": item,
-                }
-                vault["items"].append(vault_item)
-                moved_names.append(self.item_row_name(item))
-                self.vault_checked_source_ids.discard(self.vault_source_id(source))
-                self.append_vault_ledger({"action": "export", "vault_id": vault_item["id"], "source": source.get("label", ""), "item": self.item_row_name(item)})
-            self.save_vault(vault)
-            self.status_var.set(f"Moved {len(moved_names)} item(s) to transfer vault: {', '.join(moved_names[:5])}")
-            self.refresh_transfer_vault()
-        except Exception as error:
-            self.show_error("Transfer vault export failed", error)
-        finally:
-            if lock is not None:
-                self.release_vault_lock(lock)
-
-    def add_item_to_target_inventory(self, target: dict[str, Any], item: dict[str, Any]) -> None:
-        path = Path(target["path"])
-        data = self.read_json_file(path, {"InventoryID": "MetaInventoryID_Main", "Items": []})
-        if not isinstance(data, dict):
-            raise RuntimeError(f"Target inventory is not a JSON object: {path}")
-        data.setdefault("InventoryID", "MetaInventoryID_Main")
-        data.setdefault("Items", [])
-        if not isinstance(data["Items"], list):
-            raise RuntimeError(f"Target inventory Items field is not a list: {path}")
-        slot_status = self.require_inventory_slots_available(data, 1, str(target.get("label") or path))
-        data["Items"].append(self.reset_item_guid(item))
-        self.write_json_file(path, data)
-        verify = self.read_json_file(path, {})
-        verify_items = verify.get("Items", []) if isinstance(verify, dict) else []
-        if not isinstance(verify_items, list) or not verify_items:
-            raise RuntimeError("Target inventory verification failed after write")
-        self.require_inventory_slots_available(verify, 0, str(target.get("label") or path))
-        self.log(f"Transfer vault slot safety passed for {target.get('label', path)}: {slot_status}")
-
-    def vault_import_selected(self) -> None:
-        lock = None
-        try:
-            processes = self.running_icarus_processes()
-            if processes:
-                raise RuntimeError("Close Icarus before restoring vault items. Running processes: " + ", ".join(processes))
-            vault_item = self.selected_vault_item()
-            target = self.selected_vault_target()
-            item = vault_item.get("item", {})
-            if not isinstance(item, dict):
-                raise RuntimeError("Vault item is malformed")
-            if not messagebox.askyesno(
-                APP_NAME,
-                "Restore this vault item to the selected player's MetaInventory?\n\n"
-                "The app will create a save backup first, add the item, remove it from the vault, and write a ledger entry.",
-                parent=self,
-            ):
-                return
-            lock = self.acquire_vault_lock()
-            self.create_save_backup("pre_vault_import", silent=True)
-            vault = self.load_vault()
-            items = vault.get("items", [])
-            vault_id = vault_item.get("id")
-            match_index = next((index for index, entry in enumerate(items) if isinstance(entry, dict) and entry.get("id") == vault_id), None)
-            if match_index is None:
-                raise RuntimeError("Vault item changed. Rescan before restoring.")
-            self.add_item_to_target_inventory(target, item)
-            items.pop(match_index)
-            self.save_vault(vault)
-            self.append_vault_ledger({"action": "import", "vault_id": vault_id, "target": target.get("label", ""), "item": self.item_row_name(item)})
-            self.status_var.set(f"Restored vault item: {self.item_row_name(item)}")
-            self.refresh_transfer_vault()
-        except Exception as error:
-            self.show_error("Transfer vault import failed", error)
-        finally:
-            if lock is not None:
-                self.release_vault_lock(lock)
-
-    def open_transfer_vault_folder(self) -> None:
-        try:
-            self.vault_dir.mkdir(parents=True, exist_ok=True)
-            os.startfile(self.vault_dir)
-        except Exception as error:
-            self.show_error("Open transfer vault folder failed", error)
-
     def runtime_mods_root(self, win64_dir: Path) -> Path:
         modern = win64_dir / "ue4ss"
         if modern.is_dir():
@@ -2604,6 +2539,18 @@ class Configurator(tk.Tk):
                 }
                 for spec in DIRECT_SETTINGS
             ],
+            "containerSlots": [
+                {
+                    "key": spec.key,
+                    "label": spec.label,
+                    "category": "Inventory",
+                    "file": "Inventory/D_InventoryInfo.json",
+                    "field": "StartingSlots",
+                    "default": spec.default,
+                    "rowTokens": list(spec.row_tokens),
+                }
+                for spec in CONTAINER_SLOT_SETTINGS
+            ],
             "growthCurves": [
                 {
                     "key": spec.key,
@@ -2638,6 +2585,7 @@ class Configurator(tk.Tk):
         values = self.values()
         native_values = self.native_group_values()
         direct_values = self.direct_values()
+        container_slot_values = self.container_slot_values()
         curve_values = self.curve_values()
         runtime_values = self.runtime_values()
         lines: list[str] = [
@@ -2672,6 +2620,10 @@ class Configurator(tk.Tk):
             ini_key = DIRECT_INI_KEYS.get(spec.key)
             if ini_key:
                 lines.append(f"{ini_key} = {self.decimal_ini_value(direct_values[spec.key])}")
+        lines.extend(["", "[container_slots]", "; Per-container D_InventoryInfo.StartingSlots multipliers. These target specific inventory rows before the broad slotGroup ranges."])
+        for spec in CONTAINER_SLOT_SETTINGS:
+            lines.append(f"; {spec.label}: row tokens [{', '.join(spec.row_tokens)}]")
+            lines.append(f"{spec.key} = {self.decimal_ini_value(container_slot_values[spec.key])}")
         lines.extend(["", "[growth_curves]", "; One-to-one with cooked growth curve controls."])
         for spec in CURVE_SETTINGS:
             lines.append(f"; {spec.label}")
@@ -2685,6 +2637,11 @@ class Configurator(tk.Tk):
             lines.append(f"{RUNTIME_INI_KEYS[spec.key]} = {self.decimal_ini_value(runtime_values[spec.key])}")
         lines.extend(
             [
+                "",
+                "[live_bridge]",
+                "; Local runtime heartbeat used by the configurator to detect a live UE4SS game instance.",
+                "; Inventory object read/write stays guarded in the DLL until verified slot-safe runtime operations are implemented.",
+                "enabled = true",
                 "",
                 "[debug_validation]",
                 "; Opt-in runtime validation harness. Leave disabled for normal play.",
@@ -2753,6 +2710,8 @@ class Configurator(tk.Tk):
         for spec in DIRECT_SETTINGS:
             value = selected_direct.get(spec.key, spec.default)
             self.direct_vars[spec.key].set(display_multiplier(value) if is_direct_multiplier(spec) else value)
+        for spec in CONTAINER_SLOT_SETTINGS:
+            self.container_slot_vars[spec.key].set(display_multiplier(spec.default))
         curve_presets = {
             "Vanilla": {},
         }
@@ -2781,6 +2740,10 @@ class Configurator(tk.Tk):
                 1 for spec in DIRECT_SETTINGS
                 if self.direct_values()[spec.key] != Decimal(spec.default)
             )
+            container_slot_active = sum(
+                1 for spec in CONTAINER_SLOT_SETTINGS
+                if self.container_slot_values()[spec.key] != Decimal(spec.default)
+            )
             curve_active = sum(1 for value in self.curve_values().values() if value != 1)
             runtime_active = sum(
                 1 for spec in RUNTIME_SETTINGS
@@ -2788,7 +2751,7 @@ class Configurator(tk.Tk):
             )
             self.summary_var.set(
                 f"{table_active} table systems - {native_active} native ranges - "
-                f"{direct_active} direct native settings - {curve_active} growth curves - "
+                f"{direct_active} direct native settings - {container_slot_active} container slot overrides - {curve_active} growth curves - "
                 f"{runtime_active} runtime controls"
             )
         except ValueError as error:
@@ -2804,6 +2767,8 @@ class Configurator(tk.Tk):
             for group_values in self.native_group_values().values()
             for value in group_values
         ) or any(self.direct_values()[spec.key] != Decimal(spec.default) for spec in DIRECT_SETTINGS) or any(
+            self.container_slot_values()[spec.key] != Decimal(spec.default) for spec in CONTAINER_SLOT_SETTINGS
+        ) or any(
             value != 1 for value in self.curve_values().values()
         ) or self.runtime_selected()
 
@@ -3084,6 +3049,10 @@ class Configurator(tk.Tk):
                 value = self.direct_values()[spec.key]
                 if value != Decimal(spec.default):
                     lines.append(f"{spec.label}: {value} - C++ DLL INI")
+            for spec in CONTAINER_SLOT_SETTINGS:
+                value = self.container_slot_values()[spec.key]
+                if value != Decimal(spec.default):
+                    lines.append(f"{spec.label}: {display_multiplier(value)} - per-container D_InventoryInfo row")
             for spec in CURVE_SETTINGS:
                 multiplier = self.curve_values()[spec.key]
                 if multiplier != 1:
@@ -3174,10 +3143,11 @@ class Configurator(tk.Tk):
             if not selected:
                 return
             profile = {
-                "version": 7,
+                "version": 8,
                 "mod_name": self.safe_mod_name(),
                 "settings": values,
                 "direct_settings": {key: str(value) for key, value in self.direct_values().items()},
+                "container_slots": {key: str(value) for key, value in self.container_slot_values().items()},
                 "curve_settings": {key: str(value) for key, value in self.curve_values().items()},
                 "runtime_settings": {key: str(value) for key, value in self.runtime_values().items()},
                 "native_groups": {
@@ -3208,6 +3178,8 @@ class Configurator(tk.Tk):
             if key in self.direct_vars:
                 spec = next((candidate for candidate in DIRECT_SETTINGS if candidate.key == key), None)
                 self.direct_vars[key].set(display_multiplier(value) if spec and is_direct_multiplier(spec) else str(value))
+        for spec in CONTAINER_SLOT_SETTINGS:
+            self.container_slot_vars[spec.key].set(display_multiplier(profile.get("container_slots", {}).get(spec.key, spec.default)))
         for key, value in profile.get("curve_settings", {}).items():
             if key in self.curve_vars:
                 self.curve_vars[key].set(display_multiplier(value))

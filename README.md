@@ -20,9 +20,9 @@ The release is portable for players. It does not require Python, PowerShell scri
 
 If Icarus is not found automatically, the configurator prompts the player to select the Icarus folder or `Icarus\Binaries\Win64` and saves that path under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\user_settings.json`.
 
-Runtime backups, player/world save backups, logs, and generated runtime work files are stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\` instead of beside the portable exe or inside the extracted program folder.
+Runtime backups, player/world save backups, logs, live bridge status, and generated runtime work files are stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\` instead of beside the portable exe or inside the extracted program folder.
 
-The configurator also includes a `Transfer Vault` tab. It scans all local Icarus player folders, detects active prospect members, decodes live prospect inventory item names and amounts from `ProspectBlob.BinaryBlob`, and provides a locked shared stash for verified JSON-backed items such as `MetaInventory.json` and loadout meta items. The vault has an inventory dropdown with cleaner deployable, player, mount, and attachment inventory names so players can browse each inventory cleanly. Live backpack/world/container items from the compressed Unreal property blob are shown read-only until the binary inventory writer is verified.
+The configurator also includes a `Live Vault` tab. This is now focused on the UE4SS in-game bridge, not offline save-file item moving. When the UE4SS DLL is running in-game, it writes a live heartbeat to `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\status.json` so the configurator can confirm the installed runtime is actually alive. Live inventory read/write remains guarded until slot-safe Unreal object operations are verified inside the game runtime.
 
 ## Player Package Layout
 
@@ -82,7 +82,20 @@ Use `--debug-risky-arrays` only when intentionally testing free-craft style arra
 
 See [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) for the latest beta fix notes.
 
-Recent runtime fixes in `v0.1.7-beta`:
+Recent runtime fixes in `v0.1.8-beta`:
+
+- Added a UE4SS live bridge heartbeat written by the runtime DLL to `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\status.json`.
+- Replaced the exposed offline Transfer Vault workflow with a `Live Vault` tab focused on the UE4SS runtime bridge.
+- Added `Connect Live` and `Open Live Bridge` controls to the Live Vault tab.
+- The live bridge reports runtime PID, heartbeat age, and guarded inventory read/write capabilities.
+- Offline save-vault item export/import is no longer exposed as the main vault workflow.
+- Generated `settings.ini` now includes `[live_bridge] enabled = true`.
+- Added per-container slot overrides for common storage/workstation inventories so players can target specific container types instead of only broad vanilla slot-count ranges.
+- The old offline scanner code no longer scans loadout inventory rows.
+- Read-only blob scanner internals now treat decoded live blob rows as per-slot entries instead of using unverified nearby `Value` fields that could produce huge false amounts.
+- Mount inventory label internals now try to use saved mount/creature/display names before falling back to generated mount labels.
+
+Previous runtime fixes in `v0.1.7-beta`:
 
 - Skinning yield now increases carcass recipe output counts instead of touching `D_ToolDamage.Skinning_Efficiency`, which could make carcasses deplete too quickly.
 - Baseline `0` values now remain `0` during multiplier math, preventing disabled/sentinel timers from becoming one-second timers.
@@ -114,22 +127,11 @@ Every apply creates a `before_apply` backup first. Players can also create manua
 
 Backup and restore refuse to run while Icarus is open so the app does not copy or replace live save files.
 
-## Transfer Vault
+## Live Vault
 
-The `Transfer Vault` tab is an offline shared stash for local players and worlds.
+`Connect Live` checks whether the installed UE4SS runtime DLL is currently alive in a running game instance. The DLL writes a heartbeat and capability JSON file under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\`.
 
-- Scans all local `%LOCALAPPDATA%\Icarus\Saved\PlayerData\<SteamID>` folders.
-- Detects prospect members from prospect save metadata.
-- Detects compressed live-world prospect inventory blobs and lists decoded item row names read-only.
-- Provides an inventory dropdown for browsing one exposed inventory at a time with clean deployable/player/mount names, item names, amounts, and persistent checked row state.
-- Moves verified JSON-backed items into `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\transfer_vault\vault.json`.
-- Uses an exclusive `vault.lock` file so two vault operations cannot run at the same time.
-- Writes a transaction ledger to `transfer_vault\ledger.jsonl`.
-- Creates a full save backup before every vault export/import.
-- Refuses to run item moves while Icarus is open.
-- Checks known target slot capacity before restore and refuses to write if no open slot is available.
-
-Current beta support is intentionally conservative: JSON-backed meta/loadout items can be moved; live backpack/hotbar/container items inside the prospect binary blob are listed read-only until the Unreal property writer is fully validated.
+This is the foundation for live inventory transfer. In this beta, the bridge intentionally reports inventory read/write as guarded until the DLL has verified Unreal inventory object discovery, item identity checks, open-slot checks, and no-overwrite move operations inside the running session. Offline save-vault item moving is not exposed as the main workflow.
 
 ## Source Layout
 

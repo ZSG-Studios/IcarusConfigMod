@@ -29,7 +29,9 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -40,6 +42,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -218,6 +221,12 @@ struct UnsupportedSettingRule {
     const char* reason;
 };
 
+struct ContainerSlotRule {
+    const char* key;
+    const char* label;
+    std::vector<const char*> row_tokens;
+};
+
 const NumericTableRule kNumericTableRules[] = {
     {"mining_speed", "table_multipliers", "D_OreDeposit", {"MiningTimeSeconds"}, NumericMode::Divide, NumericResult::Floor, 1.0},
     {"mining_yield", "table_multipliers", "D_ToolDamage", {"Mining_Efficiency"}, NumericMode::Multiply, NumericResult::Float, 0.01},
@@ -241,6 +250,18 @@ const NumericTableRule kNumericTableRules[] = {
     {"reload_speed", "table_multipliers", "D_FirearmData", {"ReloadTime", "WeaponReloadTime"}, NumericMode::Divide, NumericResult::Float, 0.05},
     {"reload_speed", "table_multipliers", "D_RangedWeaponData", {"ReloadTime", "WeaponReloadTime"}, NumericMode::Divide, NumericResult::Float, 0.05},
     {"backpack_slots", "direct_settings", "D_InventoryInfo", {"StartingSlots"}, NumericMode::Multiply, NumericResult::Nearest, 1.0, {"Backpack"}},
+};
+
+const ContainerSlotRule kContainerSlotRules[] = {
+    {"wood_cupboard", "Wood Cupboard slots", {"Wood_Cupboard", "WoodCupboard", "Wood Cupboard"}},
+    {"storage_crate", "Storage Crate slots", {"Storage_Crate", "StorageCrate", "Crate"}},
+    {"large_storage_crate", "Large Storage Crate slots", {"Large_Storage_Crate", "LargeStorageCrate", "Large_Crate", "LargeCrate"}},
+    {"ice_box", "Ice Box slots", {"Ice_Box", "IceBox"}},
+    {"refrigerator", "Refrigerator slots", {"Refrigerator", "Fridge"}},
+    {"mortar_pestle", "Mortar and Pestle slots", {"Mortar", "Pestle"}},
+    {"crafting_bench", "Crafting Bench slots", {"Crafting_Bench", "CraftingBench"}},
+    {"fabricator", "Fabricator slots", {"Fabricator"}},
+    {"furnace", "Furnace slots", {"Furnace"}},
 };
 
 const RangeGroupRule kRangeGroupRules[] = {
@@ -550,6 +571,15 @@ bool listed_row(std::string_view row, const std::vector<const char*>& names) {
     return std::any_of(names.begin(), names.end(), [&](const char* name) { return row == name; });
 }
 
+bool row_matches_any_token(std::string_view row, const std::vector<const char*>& tokens) {
+    if (tokens.empty()) {
+        return false;
+    }
+    return std::any_of(tokens.begin(), tokens.end(), [&](const char* token) {
+        return token && *token && row.find(token) != std::string_view::npos;
+    });
+}
+
 bool excluded_row(
     std::string_view row,
     const std::vector<const char*>& contains,
@@ -589,6 +619,68 @@ bool numeric_nearly_equal(double actual, double expected) {
     const double tolerance = (std::max)(0.0001, std::abs(expected) * 0.000001);
     return std::abs(actual - expected) <= tolerance;
 }
+
+std::uint64_t unix_time_seconds() {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count()
+    );
+}
+
+std::filesystem::path live_bridge_dir() {
+    wchar_t buffer[MAX_PATH]{};
+    const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", buffer, MAX_PATH);
+    if (length > 0 && length < MAX_PATH) {
+        return std::filesystem::path(buffer) / L"ZSG Studios" / L"IcarusConfigMod" / L"live_bridge";
+    }
+    return std::filesystem::temp_directory_path() / "ZSG Studios" / "IcarusConfigMod" / "live_bridge";
+}
+
+std::string json_escape(std::string_view value) {
+    std::string escaped;
+    escaped.reserve(value.size() + 8);
+    for (const char ch : value) {
+        switch (ch) {
+        case '\\':
+            escaped += "\\\\";
+            break;
+        case '"':
+            escaped += "\\\"";
+            break;
+        case '\n':
+            escaped += "\\n";
+            break;
+        case '\r':
+            escaped += "\\r";
+            break;
+        case '\t':
+            escaped += "\\t";
+            break;
+        default:
+            escaped += ch;
+            break;
+        }
+    }
+    return escaped;
+}
+
+bool write_text_atomic(const std::filesystem::path& target, const std::string& text) {
+    std::error_code error;
+    std::filesystem::create_directories(target.parent_path(), error);
+    const auto temporary = target.string() + ".tmp";
+    {
+        std::ofstream output(temporary, std::ios::trunc);
+        if (!output) {
+            return false;
+        }
+        output << text;
+    }
+    std::filesystem::remove(target, error);
+    error.clear();
+    std::filesystem::rename(temporary, target, error);
+    return !error;
+}
 }
 
 namespace ConfigurationMod {
@@ -607,16 +699,19 @@ public:
     }
 
     ~RuntimeMod() override {
+        stop_live_bridge();
         append_log(root_, "Configuration_Mod C++ runtime unloaded.");
     }
 
     auto on_program_start() -> void override {
         append_log(root_, "UE4SS on_program_start fired.");
+        start_live_bridge("on_program_start");
     }
 
     auto on_unreal_init() -> void override {
         append_log(root_, "UE4SS on_unreal_init fired.");
         load_config("on_unreal_init");
+        start_live_bridge("on_unreal_init");
         register_hooks();
         append_log(root_, "VALIDATION StartupMode=deferred EarlyTableScan=false StaticConstructHook=false");
     }
@@ -649,6 +744,75 @@ public:
     }
 
 private:
+    bool live_bridge_enabled() const {
+        IniConfig config;
+        if (!config.load(find_unified_ini(root_))) {
+            return true;
+        }
+        return config.get_bool("live_bridge", "enabled", true);
+    }
+
+    void start_live_bridge(std::string_view phase) {
+        if (live_bridge_running_.load()) {
+            return;
+        }
+        if (!live_bridge_enabled()) {
+            append_log(root_, "LIVE_BRIDGE Disabled Phase=" + std::string(phase));
+            return;
+        }
+        live_bridge_running_ = true;
+        live_bridge_thread_ = std::thread([this]() { live_bridge_loop(); });
+        append_log(root_, "LIVE_BRIDGE Started Phase=" + std::string(phase) + " Dir=" + narrow(live_bridge_dir()));
+    }
+
+    void stop_live_bridge() {
+        if (!live_bridge_running_.exchange(false)) {
+            return;
+        }
+        if (live_bridge_thread_.joinable()) {
+            live_bridge_thread_.join();
+        }
+    }
+
+    void write_live_bridge_status(std::string_view state) const {
+        const auto bridge_root = live_bridge_dir();
+        const auto status_path = bridge_root / "status.json";
+        std::ostringstream json;
+        json << "{\n";
+        json << "  \"schema\": 1,\n";
+        json << "  \"bridgeVersion\": \"0.1\",\n";
+        json << "  \"state\": \"" << json_escape(state) << "\",\n";
+        json << "  \"modName\": \"Configuration_Mod\",\n";
+        json << "  \"pid\": " << GetCurrentProcessId() << ",\n";
+        json << "  \"timestampUnix\": " << unix_time_seconds() << ",\n";
+        json << "  \"modDir\": \"" << json_escape(narrow(root_)) << "\",\n";
+        json << "  \"statusPath\": \"" << json_escape(narrow(status_path)) << "\",\n";
+        json << "  \"inventoryRead\": false,\n";
+        json << "  \"inventoryWrite\": false,\n";
+        json << "  \"capabilities\": {\n";
+        json << "    \"heartbeat\": true,\n";
+        json << "    \"inventorySnapshot\": false,\n";
+        json << "    \"moveItem\": false,\n";
+        json << "    \"slotSafeMove\": false\n";
+        json << "  },\n";
+        json << "  \"message\": \"Live bridge heartbeat is connected. Runtime inventory object scan/write is guarded until Unreal inventory object operations are verified.\"\n";
+        json << "}\n";
+
+        if (!write_text_atomic(status_path, json.str())) {
+            append_log(root_, "LIVE_BRIDGE WriteFailed Path=" + narrow(status_path));
+        }
+    }
+
+    void live_bridge_loop() {
+        append_log(root_, "LIVE_BRIDGE HeartbeatLoopStarted");
+        while (live_bridge_running_.load()) {
+            write_live_bridge_status("running");
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+        }
+        write_live_bridge_status("stopped");
+        append_log(root_, "LIVE_BRIDGE HeartbeatLoopStopped");
+    }
+
     void register_hooks() {
         if (hooks_registered_) {
             return;
@@ -906,6 +1070,11 @@ private:
         for (const auto& rule : kNumericTableRules) {
             const double value = debug_multiplier(config.get_number(rule.section, rule.key, 1.0), debug);
             auto& status = ensure_setting_status(statuses, rule.section, rule.key, value, !is_vanilla_multiplier(value));
+            status.targets_seen += data_tables_seen;
+        }
+        for (const auto& rule : kContainerSlotRules) {
+            const double value = debug_multiplier(config.get_number("container_slots", rule.key, 1.0), debug);
+            auto& status = ensure_setting_status(statuses, "container_slots", rule.key, value, !is_vanilla_multiplier(value));
             status.targets_seen += data_tables_seen;
         }
         for (const auto& rule : kRangeGroupRules) {
@@ -1200,11 +1369,11 @@ private:
                     if (is_vanilla_multiplier(multiplier)) {
                         continue;
                     }
-                    if (std::string_view(rule.key) == "skinning_yield" && table_stem_matches(table_name, "D_ToolDamage")) {
-                        ++status.skipped;
-                        status.reason = "skinning_yield_uses_carcass_outputs";
-                        append_log(root_, "SAFETY_SKIP SkinningEfficiencyToolDamage Table=" + table_name + " Reason=would_speed_carcass_depletion");
-                        continue;
+                if (std::string_view(rule.key) == "skinning_yield" && table_stem_matches(table_name, "D_ToolDamage")) {
+                    ++status.skipped;
+                    status.reason = "skinning_yield_uses_carcass_outputs";
+                    append_log(root_, "SAFETY_SKIP SkinningEfficiencyToolDamage Table=" + table_name + " Reason=would_speed_carcass_depletion");
+                    continue;
                     }
                     std::size_t rule_applied = 0;
                     std::size_t rule_missing = 0;
@@ -1221,6 +1390,12 @@ private:
                         numeric_fields_missing += rule_missing;
                         status.missing += rule_missing;
                     }
+                }
+
+                if (table_stem_matches(table_name, "D_InventoryInfo")) {
+                    const auto applied = apply_container_slot_rules(table, config, setting_statuses, debug);
+                    numeric_fields_applied += applied.first;
+                    numeric_fields_missing += applied.second;
                 }
 
                 for (const auto& rule : kRangeGroupRules) {
@@ -2199,6 +2374,94 @@ private:
                 "table=" + narrow_unreal(table->GetFullName()) + ";row=" + row_name + ";setting=" + rule.key + ";field=" + field_name
             );
             ++applied;
+        }
+        return {applied, missing};
+    }
+
+    bool active_container_slot_override_for_row(const IniConfig& config, std::string_view row_name, const DebugValidationConfig& debug) const {
+        for (const auto& rule : kContainerSlotRules) {
+            const double multiplier = debug_multiplier(config.get_number("container_slots", rule.key, 1.0), debug);
+            if (!is_vanilla_multiplier(multiplier) && row_matches_any_token(row_name, rule.row_tokens)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::pair<std::size_t, std::size_t> apply_container_slot_rules(
+        RC::Unreal::UObject* table,
+        const IniConfig& config,
+        SettingStatusMap& statuses,
+        const DebugValidationConfig& debug
+    ) {
+        if (!table || !table_stem_matches(narrow_unreal(table->GetFullName()), "D_InventoryInfo")) {
+            return {0, 0};
+        }
+        const auto rows = get_table_rows(table, "container_slots");
+        if (!rows) {
+            return {0, 1};
+        }
+        auto* property = find_struct_property_by_name(rows->row_struct, "StartingSlots");
+        auto* numeric_property = as_numeric_property(property);
+        if (!numeric_property) {
+            append_log(
+                root_,
+                "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
+                    + " Field=StartingSlots PropertyClass=" + property_class_name(property)
+                    + " Reason=container_slots_not_numeric"
+            );
+            return {0, 1};
+        }
+
+        std::size_t applied = 0;
+        std::size_t missing = 0;
+        for (auto it = rows->row_map->CreateIterator(); it; ++it) {
+            const auto row_name = narrow_unreal(it.Key().ToString());
+            unsigned char* row = it.Value();
+            if (!row) {
+                ++missing;
+                continue;
+            }
+            void* value_ptr = numeric_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row));
+            if (!value_ptr) {
+                ++missing;
+                continue;
+            }
+            for (const auto& rule : kContainerSlotRules) {
+                auto& status = statuses[setting_id("container_slots", rule.key)];
+                if (!row_matches_any_token(row_name, rule.row_tokens)) {
+                    continue;
+                }
+                ++status.targets_matched;
+                const double multiplier = clamped_multiplier(debug_multiplier(config.get_number("container_slots", rule.key, 1.0), debug), 0.0, 1000000.0);
+                if (is_vanilla_multiplier(multiplier)) {
+                    continue;
+                }
+                const double current = read_numeric_value(numeric_property, value_ptr);
+                const double baseline = numeric_baselines_.try_emplace(value_ptr, current).first->second;
+                double adjusted = adjusted_numeric(baseline, multiplier, NumericMode::Multiply, NumericResult::Nearest, 1.0);
+                if (adjusted < baseline) {
+                    append_log(
+                        root_,
+                        "SAFETY_CLAMP ContainerSlotNoShrink Table=" + narrow_unreal(table->GetFullName())
+                            + " Row=" + row_name
+                            + " Setting=" + rule.key
+                            + " Baseline=" + std::to_string(baseline)
+                            + " Requested=" + std::to_string(adjusted)
+                    );
+                    adjusted = baseline;
+                }
+                const auto verify_failures_before = mutation_math_failures_;
+                write_numeric_checked(
+                    numeric_property,
+                    value_ptr,
+                    adjusted,
+                    "table=" + narrow_unreal(table->GetFullName()) + ";row=" + row_name + ";container_slot=" + rule.key + ";field=StartingSlots"
+                );
+                status.applied += 1;
+                status.verify_failed += mutation_math_failures_ - verify_failures_before;
+                ++applied;
+            }
         }
         return {applied, missing};
     }
@@ -3186,6 +3449,15 @@ private:
             if (excluded_row(row_name, rule.exclude_contains)) {
                 continue;
             }
+            if (std::string_view(rule.key_prefix) == "slotGroup" && active_container_slot_override_for_row(config, row_name, debug)) {
+                append_log(
+                    root_,
+                    "SAFETY_SKIP SlotGroupPerContainerOverride Table=" + narrow_unreal(table->GetFullName())
+                        + " Row=" + row_name
+                        + " Reason=container_slots_override_active"
+                );
+                continue;
+            }
             unsigned char* row = it.Value();
             if (!row) {
                 ++missing;
@@ -3254,6 +3526,8 @@ private:
     std::size_t mutation_math_failures_{0};
     std::size_t mutation_math_logs_{0};
     bool mutation_debug_log_each_{false};
+    std::atomic_bool live_bridge_running_{false};
+    std::thread live_bridge_thread_;
 };
 }
 

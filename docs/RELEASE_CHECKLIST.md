@@ -56,8 +56,9 @@ The player zip should not include:
 - First app load shows `Vanilla Defaults`.
 - Dropdown also shows `Premade_Configuration`.
 - Dropdown entries do not show `.json`.
-- Transfer Vault tab scans local player folders without moving items.
-- Transfer Vault zip/release docs clearly state that prospect binary blob inventories are scan-only until the writer is validated.
+- Live Vault tab reports the UE4SS DLL heartbeat from `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\status.json`.
+- Live Vault docs clearly state inventory read/write is guarded until the runtime object writer is validated.
+- Offline save-vault export/import is not exposed as the player workflow.
 - Clicking install while vanilla is selected shows a clean message instead of a traceback.
 - If Icarus is not found automatically, clicking install prompts for the Icarus folder or `Icarus\Binaries\Win64`.
 - Imported or saved profiles are copied into `profiles/` and appear in the dropdown.
@@ -74,3 +75,4 @@ After installing and launching Icarus, inspect the runtime log for:
 - No active settings with `Result=partial`, `Result=pending`, or `Result=skipped`.
 - For carcass testing, confirm killed animals remain harvestable and `skinning_yield` applies through carcass output counts rather than `D_ToolDamage.Skinning_Efficiency`.
 - For health/speed testing, remember these are table-backed stat grants and may require session load, spawn, respawn, healing, or game stat refresh before the visible HUD/current pawn reflects the changed base values.
+- For live bridge testing, confirm `LIVE_BRIDGE Started`, `LIVE_BRIDGE HeartbeatLoopStarted`, and a fresh `status.json` heartbeat while Icarus is running.

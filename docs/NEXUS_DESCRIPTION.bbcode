@@ -17,7 +17,7 @@ This mod is built for configurable balance testing. It can adjust progression, r
 [*]Lets players create, save, import, and reuse custom profiles.[/*]
 [*]Creates an automatic player/world save backup before applying configuration changes.[/*]
 [*]Includes a Save Backups tab for manual backup, restore, refresh, and opening the backup folder.[/*]
-[*]Includes a Transfer Vault tab for scanning local players/worlds, browsing one exposed inventory at a time from a dropdown with cleaner deployable/player/mount names, listing live prospect inventory item names and amounts read-only, checking item rows across dropdown changes, and moving verified JSON-backed items through a shared offline stash with slot safety checks.[/*]
+[*]Includes a [b]Live Vault[/b] tab with a [b]Connect Live[/b] check that detects the running UE4SS DLL heartbeat from the in-game runtime.[/*]
 [*]Writes selected settings into a unified runtime config.[/*]
 [*]Applies supported settings in-game through the DLL backend.[/*]
 [*]Writes validation logs so players can confirm active settings applied.[/*]
@@ -50,6 +50,7 @@ This mod is built for configurable balance testing. It can adjust progression, r
 [list]
 [*]Mission currency and XP reward group multipliers[/*]
 [*]Stack size groups, container slot groups, and backpack slot multiplier[/*]
+[*]Per-container slot overrides for common storage and workstation inventories[/*]
 [*]Air control multiplier applied at runtime to loaded movement components[/*]
 [/list]
 
@@ -76,7 +77,12 @@ If [b]GreenLight=NO[/b], check nearby [b]SETTING_STATUS[/b] lines to see which a
 
 [heading]Current Beta Notes[/heading]
 [list]
-[*]This [b]v0.1.7-beta[/b] build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, zero-value timer math, the Transfer Vault beta with cleaner player inventory names, persistent checked item rows, inventory dropdown browsing, read-only live prospect inventory item amounts, and restore slot safety checks.[/*]
+[*]This [b]v0.1.8-beta[/b] build adds a UE4SS live bridge heartbeat and [b]Live Vault[/b] status check.[/*]
+[*]The runtime DLL writes live status to [b]%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\status.json[/b] while the mod is loaded in-game.[/*]
+[*]Offline save-vault item export/import is not exposed as the player workflow.[/*]
+[*]Live inventory read/write is guarded until Unreal object discovery, item identity checks, open-slot checks, and no-overwrite moves are verified in the running session.[/*]
+[*]Old scanner internals hide loadout inventories, display read-only blob rows as per-slot entries, and try saved mount/creature names first.[/*]
+[*]This build also includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, zero-value timer math, cleaner player inventory names, persistent checked item rows, inventory dropdown browsing, and restore slot safety checks.[/*]
 [*]Skinning yield now increases carcass output counts instead of changing [b]D_ToolDamage.Skinning_Efficiency[/b], which could make carcasses deplete too quickly.[/*]
 [*]Baseline 0 values now stay 0 during multiplier math, preventing disabled or sentinel timers from becoming one-second timers.[/*]
 [*]Free craft no longer clears [b]ResourceInputs[/b], avoiding live resource drain behavior.[/*]
@@ -109,21 +115,17 @@ When present, backups include:
 
 Every apply creates a [b]before_apply[/b] backup first. Restoring a backup creates a [b]pre_restore[/b] backup before replacing matching save components. Close Icarus before creating or restoring backups so the app does not copy or replace live save files.
 
-[heading]Transfer Vault[/heading]
-The [b]Transfer Vault[/b] tab scans local Icarus player folders and prospect files. It has an inventory dropdown for clean one-inventory-at-a-time browsing, keeps checked item rows selected when switching inventories, and can move verified JSON-backed items, such as meta inventory/loadout items, into a shared offline stash under [b]%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\transfer_vault[/b].
+[heading]Live Vault[/heading]
+The [b]Live Vault[/b] tab connects to the running UE4SS DLL bridge. It reports whether the in-game runtime is alive, the process ID, heartbeat freshness, and whether live inventory snapshot or slot-safe move capability is enabled.
 
 [list]
-[*]Creates a full save backup before vault export/import.[/*]
-[*]Uses a [b]vault.lock[/b] file so two vault operations cannot run at the same time.[/*]
-[*]Writes a transaction ledger to [b]transfer_vault\ledger.jsonl[/b].[/*]
-[*]Refuses item moves while Icarus is open.[/*]
-[*]Checks known target slot capacity before restore and refuses to write if no open slot is available.[/*]
-[*]Detects active prospect members and decodes compressed live-world inventory item row names, amounts, cleaner owning inventory names, and player names read-only.[/*]
-[*]Hides internal attachment, ammo-slot, and prospect-manager inventories from the dropdown.[/*]
-[*]Separates same-name containers with unique suffixes so each dropdown option maps to one actual inventory.[/*]
+[*]Checks the live UE4SS DLL heartbeat through [b]Connect Live[/b].[/*]
+[*]Shows runtime bridge state, PID, capability flags, and heartbeat path.[/*]
+[*]Keeps live inventory writes guarded until the DLL verifies Unreal inventory object access, slot checks, and no-overwrite moves.[/*]
+[*]Does not expose offline save-vault item moving as the player workflow.[/*]
 [/list]
 
-[b]Beta limit:[/b] live backpack, hotbar, belt, equipment, mount cargo, and world container items inside [b]ProspectBlob.BinaryBlob[/b] are listed read-only until the Unreal property writer is fully validated.
+[b]Beta limit:[/b] live backpack, hotbar, belt, equipment, mount cargo, and world container moves remain guarded until the runtime Unreal inventory object writer is fully validated.
 
 [heading]Installation Instructions[/heading]
 [list=1]

@@ -31,17 +31,15 @@ LICENSE
 
 `main.dll` is shipped at the package root for a clean download layout. The configurator installs it into the UE4SS-required game layout when applying settings.
 
-Runtime backups, player/world save backups, logs, saved Icarus folder selection, and generated runtime work files are stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\`, not in the extracted mod folder.
+Runtime backups, player/world save backups, logs, live bridge status, saved Icarus folder selection, and generated runtime work files are stored under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\`, not in the extracted mod folder.
 
-## Transfer Vault
+## Live Vault
 
-Use the `Transfer Vault` tab to scan local Icarus players/worlds and move verified JSON-backed items through a shared offline stash. The vault creates backups, uses a lock file, writes a transaction ledger, and has an inventory dropdown for browsing one exposed inventory at a time with clean deployable/player/mount names, item names, amounts, and persistent checked item rows.
+Use the `Live Vault` tab to check the in-game UE4SS runtime bridge. This is now the main vault direction; offline save-file item moving is not exposed as the player workflow.
 
-Internal attachment/ammo/prospect-manager inventories are hidden from the dropdown. Same-name containers are separated with unique suffixes so each dropdown option maps to one actual inventory.
+Use `Connect Live` to check whether the in-game UE4SS DLL is currently running. The DLL writes a heartbeat under `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\`. Live inventory read/write remains guarded until slot-safe Unreal object moves are verified inside the running session.
 
-Before restoring an item, the vault checks known target slot capacity and refuses to write if the target has no open slot, duplicate explicit slots, or out-of-range slot data.
-
-Live backpack/hotbar/container items inside prospect binary blobs are decoded and listed read-only with amounts in this beta until the binary inventory writer is validated.
+The old offline scanner internals no longer scan loadout inventories, treat decoded blob rows as per-slot entries instead of aggregated stack totals, and try saved mount/creature names when available.
 
 ## Profiles
 
@@ -62,7 +60,7 @@ Partial=0 Pending=0 Skipped=0 Unsupported=0 MissingFields=0
 
 ## Beta Notes
 
-This `v0.1.7-beta` build includes runtime safety fixes for carcass harvesting, free-craft/resource input handling, zero-value timer math, the Transfer Vault beta with read-only live prospect inventory item listing, cleaner player inventory names, persistent checked item rows, inventory dropdown browsing, item amount display, and restore slot safety checks.
+This `v0.1.8-beta` build adds a UE4SS live bridge heartbeat, Live Vault `Connect Live` status check, per-container slot overrides, loadout hiding in the old scanner internals, safer per-slot blob display, and improved mount inventory names.
 
 Skinning yield is applied through carcass output counts instead of tool-damage skinning efficiency, which prevents the yield setting from making carcasses deplete too quickly.
 

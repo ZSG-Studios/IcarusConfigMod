@@ -321,6 +321,10 @@ def generate_runtime_package(profile_path: Path) -> Path:
         spec.key: tk.StringVar(interp, value=configurator.display_multiplier(spec.default) if configurator.is_direct_multiplier(spec) else spec.default)
         for spec in configurator.DIRECT_SETTINGS
     }
+    app.container_slot_vars = {
+        spec.key: tk.StringVar(interp, value=configurator.display_multiplier(spec.default))
+        for spec in configurator.CONTAINER_SLOT_SETTINGS
+    }
     app.curve_vars = {spec.key: tk.StringVar(interp, value=configurator.display_multiplier(1)) for spec in configurator.CURVE_SETTINGS}
     app.runtime_vars = {spec.key: tk.StringVar(interp, value=configurator.display_multiplier(spec.default)) for spec in configurator.RUNTIME_SETTINGS}
     app.native_group_vars = {

@@ -1,5 +1,26 @@
 # Release Notes
 
+## v0.1.8-beta - Live Vault Bridge
+
+This update pivots the vault work to the UE4SS live runtime bridge and removes the offline save-vault workflow from the main UI.
+
+### Added
+
+- The runtime DLL now writes a live heartbeat to `%LOCALAPPDATA%\ZSG Studios\IcarusConfigMod\live_bridge\status.json`.
+- The heartbeat reports runtime state, process ID, timestamp, mod path, and bridge capabilities.
+- The exposed vault tab is now `Live Vault`.
+- The Live Vault tab has `Connect Live` and `Open Live Bridge` controls.
+- Generated runtime `settings.ini` includes `[live_bridge] enabled = true`.
+- Added per-container slot overrides for common storage and workstation inventories.
+- The old offline scanner internals no longer scan loadout inventory rows.
+- Old scanner mount labels now try saved mount/creature/display names before using generated fallbacks.
+
+### Safety
+
+- Offline save-vault export/import is no longer exposed as the player workflow.
+- Live inventory read/write is explicitly reported as guarded until Unreal inventory object discovery, item identity, open-slot checks, and no-overwrite moves are verified in the running session.
+- Old read-only blob item rows now display as per-slot entries instead of using unverified nearby `Value` fields for stack amounts.
+
 ## v0.1.7-beta - Transfer Vault Checked Items
 
 This update adds persistent checked row state to the Transfer Vault item browser and improves player inventory names.
