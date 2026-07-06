@@ -1324,11 +1324,11 @@ private:
                         auto& status = setting_statuses[setting_id("direct_settings", "free_craft")];
                         ++status.targets_matched;
                         const auto verify_failures_before = mutation_math_failures_;
-                        const auto inputs = set_array_numeric_field(table, "Inputs", "Count", 0.0);
-                        const auto query_inputs = set_array_numeric_field(table, "QueryInputs", "Count", 0.0);
-                        const auto resource_inputs = set_array_numeric_field(table, "ResourceInputs", "Count", 0.0);
+                        const auto inputs = set_array_numeric_field(table, "Inputs", "Count", 0.0, true);
+                        const auto query_inputs = set_array_numeric_field(table, "QueryInputs", "Count", 0.0, true);
+                        const auto resource_inputs = set_array_numeric_field(table, "ResourceInputs", "Count", 0.0, false);
                         const std::size_t cleared = inputs.first + query_inputs.first + resource_inputs.first;
-                        const std::size_t missing = inputs.second + query_inputs.second + resource_inputs.second;
+                        const std::size_t missing = cleared > 0 ? 0 : inputs.second + query_inputs.second + resource_inputs.second;
                         free_craft_fields_applied += cleared;
                         free_craft_fields_missing += missing;
                         array_fields_applied += cleared;
@@ -2786,7 +2786,8 @@ private:
         RC::Unreal::UObject* table,
         const char* array_field,
         const char* numeric_field,
-        double expected
+        double expected,
+        bool required
     ) {
         const auto rows = get_table_rows(table, "set_array_numeric_field");
         if (!rows) {
@@ -2803,13 +2804,14 @@ private:
         if (!array_property || !inner_struct || !numeric_property) {
             append_log(
                 root_,
-                "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
+                std::string(required ? "FIELD_MISS " : "FIELD_OPTIONAL_MISS ")
+                    + "Table=" + narrow_unreal(table->GetFullName())
                     + " ArrayField=" + array_field
                     + " Field=" + numeric_field
                     + " PropertyClass=" + property_class_name(numeric_property_base)
                     + " Reason=array_numeric_field_not_found"
             );
-            return {0, 1};
+            return {0, required ? 1 : 0};
         }
 
         std::size_t applied = 0;
