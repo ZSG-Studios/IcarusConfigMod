@@ -23,7 +23,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 APP_NAME = "Icarus Balance Configurator"
-APP_VERSION = "0.1.4-beta"
+APP_VERSION = "0.1.5-beta"
 UE4SS_RELEASES_API = "https://api.github.com/repos/UE4SS-RE/RE-UE4SS/releases"
 RUNTIME_MOD_FOLDER = "Configuration_Mod"
 RUNTIME_INI_NAME = "settings.ini"
@@ -678,8 +678,11 @@ class Configurator(tk.Tk):
         self.vault_ledger_path = self.vault_dir / "ledger.jsonl"
         self.vault_listbox: tk.Listbox | None = None
         self.vault_source_listbox: tk.Listbox | None = None
+        self.vault_inventory_combo: ttk.Combobox | None = None
         self.vault_target_combo: ttk.Combobox | None = None
         self.vault_summary_var = tk.StringVar(value="Transfer vault not scanned")
+        self.vault_inventory_var = tk.StringVar(value="All inventories")
+        self.vault_all_sources: list[dict[str, Any]] = []
         self.vault_sources: list[dict[str, Any]] = []
         self.vault_items: list[dict[str, Any]] = []
         self.vault_targets: list[dict[str, Any]] = []
@@ -951,7 +954,7 @@ class Configurator(tk.Tk):
         ttk.Label(outer, textvariable=self.vault_summary_var, style="Hud.TLabel").pack(anchor=tk.W, pady=(0, 8))
         ttk.Label(
             outer,
-            text="Offline shared stash for all local players. Close Icarus first. JSON inventories can be moved now; live world inventories inside ProspectBlob are detected but not edited until the binary inventory writer is verified.",
+            text="Offline shared stash for all local players. Pick an inventory to view its items and amounts. JSON inventory items can be moved now; live world inventory items are view-only until the binary inventory writer is verified.",
             style="CardText.TLabel",
             wraplength=980,
         ).pack(anchor=tk.W, pady=(0, 8))
@@ -967,6 +970,18 @@ class Configurator(tk.Tk):
 
         left = ttk.LabelFrame(columns, text="Detected Player/World Items", style="Card.TLabelframe", padding=8)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
+        inventory_selector = ttk.Frame(left, style="Panel.TFrame")
+        inventory_selector.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(inventory_selector, text="Inventory:", style="CardText.TLabel").pack(side=tk.LEFT)
+        self.vault_inventory_combo = ttk.Combobox(
+            inventory_selector,
+            textvariable=self.vault_inventory_var,
+            state="readonly",
+            width=52,
+            style="Profile.TCombobox",
+        )
+        self.vault_inventory_combo.pack(side=tk.LEFT, padx=(6, 0), fill=tk.X, expand=True)
+        self.vault_inventory_combo.bind("<<ComboboxSelected>>", lambda _event: self.refresh_vault_source_list())
         self.vault_source_listbox = tk.Listbox(
             left,
             height=18,
@@ -1600,6 +1615,51 @@ class Configurator(tk.Tk):
                     return entry.get("Value", 1)
         return 1
 
+    def clean_item_name(self, value: str) -> str:
+        name = re.sub(r"[^A-Za-z0-9_./:-]+", " ", value).strip()
+        name = name.replace("_", " ")
+        return re.sub(r"\s+", " ", name) or "Unknown Item"
+
+    def clean_inventory_name(self, value: str, fallback: str = "Inventory") -> str:
+        if not value or value == "Unknown saved inventory":
+            return fallback
+        match = re.search(r"(?:GEN_|GENERATED_)(\d+)", value)
+        if match:
+            return f"World Container {int(match.group(1))}"
+        name = value
+        for prefix in ("BP_", "B_", "SK_"):
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+        name = re.sub(r"_[A-F0-9]{6,}.*$", "", name)
+        name = name.replace("_", " ")
+        name = re.sub(r"\s+", " ", name).strip()
+        return name or fallback
+
+    def item_display_amount(self, item: dict[str, Any]) -> Any:
+        if "amount" in item:
+            return item.get("amount", 1)
+        return self.item_stack_value(item)
+
+    def item_display_name(self, item: dict[str, Any]) -> str:
+        if "row_name" in item:
+            return self.clean_item_name(str(item.get("row_name") or "UnknownItem"))
+        return self.clean_item_name(self.item_row_name(item))
+
+    def unreal_int_property_after_key(self, data: bytes, key: bytes, start: int = 0, search_limit: int = 512) -> int | None:
+        key_pos = data.find(key, start, min(len(data), start + search_limit))
+        if key_pos < 0:
+            return None
+        prop = b"IntProperty\x00"
+        prop_pos = data.find(prop, key_pos, min(len(data), key_pos + 128))
+        if prop_pos < 0:
+            return None
+        cursor = prop_pos + len(prop)
+        pattern = b"\x04\x00\x00\x00\x00\x00\x00\x00\x00"
+        rel = data.find(pattern, cursor, min(len(data), cursor + 24))
+        if rel < 0 or rel + len(pattern) + 4 > len(data):
+            return None
+        return int.from_bytes(data[rel + len(pattern):rel + len(pattern) + 4], "little", signed=True)
+
     def item_slot_index(self, item: dict[str, Any]) -> int | None:
         for key in ("Location", "Slot", "SlotIndex", "InventorySlot", "ItemSlot"):
             value = item.get(key)
@@ -1738,6 +1798,7 @@ class Configurator(tk.Tk):
         if isinstance(items, list):
             for index, item in enumerate(items):
                 if isinstance(item, dict):
+                    amount = self.item_stack_value(item)
                     sources.append(
                         {
                             "transferable": True,
@@ -1746,7 +1807,10 @@ class Configurator(tk.Tk):
                             "steam_id": steam_dir.name,
                             "index": index,
                             "item": item,
-                            "label": f"{steam_dir.name} | MetaInventory | {self.item_row_name(item)} x{self.item_stack_value(item)}",
+                            "inventory_label": f"{steam_dir.name} - Meta Inventory",
+                            "display_name": self.item_display_name(item),
+                            "display_amount": amount,
+                            "label": f"{self.item_display_name(item)} x{amount}",
                         }
                     )
         return sources, target
@@ -1766,6 +1830,7 @@ class Configurator(tk.Tk):
                 continue
             for item_index, item in enumerate(items):
                 if isinstance(item, dict):
+                    amount = self.item_stack_value(item)
                     sources.append(
                         {
                             "transferable": True,
@@ -1775,7 +1840,10 @@ class Configurator(tk.Tk):
                             "loadout_index": loadout_index,
                             "index": item_index,
                             "item": item,
-                            "label": f"{steam_dir.name} | Loadout {loadout_index} | {self.item_row_name(item)} x{self.item_stack_value(item)}",
+                            "inventory_label": f"{steam_dir.name} - Loadout {loadout_index}",
+                            "display_name": self.item_display_name(item),
+                            "display_amount": amount,
+                            "label": f"{self.item_display_name(item)} x{amount}",
                         }
                     )
         return sources
@@ -1868,13 +1936,17 @@ class Configurator(tk.Tk):
             item_pos = decompressed.find(marker, cursor)
             if item_pos < 0:
                 break
+            next_pos = decompressed.find(marker, item_pos + len(marker))
+            item_end = next_pos if next_pos >= 0 else min(len(decompressed), item_pos + 4096)
             row_name, _row_pos = self.unreal_name_property_after_key(decompressed, marker, item_pos)
             if row_name and row_name != "None":
                 actor_name = self.nearest_blob_actor_name(decompressed, item_pos)
+                amount = self.unreal_int_property_after_key(decompressed, b"Value\x00", item_pos, item_end - item_pos)
                 items.append(
                     {
                         "row_name": row_name,
                         "actor_name": actor_name,
+                        "amount": amount if amount is not None and amount > 0 else 1,
                         "offset": item_pos,
                     }
                 )
@@ -1910,6 +1982,12 @@ class Configurator(tk.Tk):
             except Exception:
                 blob_items = []
             for index, item in enumerate(blob_items):
+                inventory_label = (
+                    f"Prospect {prospect_id} - "
+                    f"{self.clean_inventory_name(item['actor_name'], 'Saved Inventory')}"
+                )
+                display_name = self.clean_item_name(item["row_name"])
+                amount = item.get("amount", 1)
                 sources.append(
                     {
                         "transferable": False,
@@ -1919,11 +1997,12 @@ class Configurator(tk.Tk):
                         "item_index": index,
                         "row_name": item["row_name"],
                         "actor_name": item["actor_name"],
+                        "amount": amount,
                         "offset": item["offset"],
-                        "label": (
-                            f"{steam_dir.name} | Prospect {prospect_id} | {item['actor_name']} | "
-                            f"{item['row_name']} | blob item offset {item['offset']} | view-only"
-                        ),
+                        "inventory_label": inventory_label,
+                        "display_name": display_name,
+                        "display_amount": amount,
+                        "label": f"{display_name} x{amount}",
                     }
                 )
             members = info.get("AssociatedMembers", []) if isinstance(info, dict) else []
@@ -1958,15 +2037,49 @@ class Configurator(tk.Tk):
             sources.extend(self.scan_prospect_sources(steam_dir))
         return sources, targets
 
+    def vault_inventory_labels(self) -> list[str]:
+        labels: list[str] = ["All inventories"]
+        for source in self.vault_all_sources:
+            label = source.get("inventory_label")
+            if isinstance(label, str) and label and label not in labels:
+                labels.append(label)
+        return labels
+
+    def filtered_vault_sources(self) -> list[dict[str, Any]]:
+        selected = self.vault_inventory_var.get()
+        if not selected or selected == "All inventories":
+            return [source for source in self.vault_all_sources if source.get("inventory_label")]
+        return [
+            source for source in self.vault_all_sources
+            if source.get("inventory_label") == selected
+        ]
+
+    def refresh_vault_source_list(self) -> None:
+        self.vault_sources = self.filtered_vault_sources()
+        if self.vault_source_listbox is not None:
+            self.vault_source_listbox.delete(0, tk.END)
+            for source in self.vault_sources:
+                prefix = "MOVE" if source.get("transferable") else "VIEW"
+                inventory = source.get("inventory_label", "Inventory")
+                item = source.get("item", {})
+                name = source.get("display_name")
+                if not name and isinstance(item, dict):
+                    name = self.item_display_name(item)
+                if not name:
+                    name = source.get("label", "Unknown Item")
+                amount = source.get("display_amount", 1)
+                self.vault_source_listbox.insert(tk.END, f"{prefix} | {inventory} | {name} x{amount}")
+
     def refresh_transfer_vault(self) -> None:
         try:
-            self.vault_sources, self.vault_targets = self.scan_transfer_sources()
+            self.vault_all_sources, self.vault_targets = self.scan_transfer_sources()
             self.vault_items = self.load_vault().get("items", [])
-            if self.vault_source_listbox is not None:
-                self.vault_source_listbox.delete(0, tk.END)
-                for source in self.vault_sources:
-                    prefix = "MOVE" if source.get("transferable") else "SCAN"
-                    self.vault_source_listbox.insert(tk.END, f"{prefix} | {source.get('label', '')}")
+            inventory_labels = self.vault_inventory_labels()
+            if self.vault_inventory_combo is not None:
+                self.vault_inventory_combo.configure(values=inventory_labels)
+            if self.vault_inventory_var.get() not in inventory_labels:
+                self.vault_inventory_var.set(inventory_labels[0] if inventory_labels else "All inventories")
+            self.refresh_vault_source_list()
             if self.vault_listbox is not None:
                 self.vault_listbox.delete(0, tk.END)
                 for item in self.vault_items:
@@ -1980,9 +2093,11 @@ class Configurator(tk.Tk):
                 self.vault_target_combo.configure(values=target_labels)
             if target_labels and self.vault_target_var.get() not in target_labels:
                 self.vault_target_var.set(target_labels[0])
-            transferable = sum(1 for source in self.vault_sources if source.get("transferable"))
+            transferable = sum(1 for source in self.vault_all_sources if source.get("transferable"))
+            view_only = sum(1 for source in self.vault_all_sources if source.get("inventory_label") and not source.get("transferable"))
             self.vault_summary_var.set(
-                f"Players scanned: {len(self.vault_targets)}    Move-ready JSON items: {transferable}    "
+                f"Players scanned: {len(self.vault_targets)}    Inventories: {max(0, len(inventory_labels) - 1)}    "
+                f"Move-ready JSON items: {transferable}    View-only live items: {view_only}    "
                 f"Vault items: {len(self.vault_items)}    Vault folder: {self.vault_dir}"
             )
         except Exception as error:

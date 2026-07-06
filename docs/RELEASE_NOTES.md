@@ -1,5 +1,17 @@
 # Release Notes
 
+## v0.1.5-beta - Transfer Vault Inventory Browser
+
+This update makes the Transfer Vault source browser usable as an inventory viewer instead of one long mixed list.
+
+### Added
+
+- Added an inventory dropdown to the Transfer Vault source panel.
+- Selecting an inventory filters the item list to that inventory.
+- Live prospect blob items now show decoded amounts when available.
+- Source rows now use clean item names and simple `x amount` display text.
+- Summary now reports detected inventory count, move-ready JSON items, and view-only live items.
+
 ## v0.1.4-beta - Transfer Vault Slot Safety
 
 This update adds hard preflight checks before Transfer Vault restore writes.
