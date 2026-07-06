@@ -1137,8 +1137,8 @@ private:
             std::size_t bool_fields_missing = 0;
             std::size_t direct_reward_fields_applied = 0;
             std::size_t direct_reward_fields_missing = 0;
-            std::size_t arrays_cleared = 0;
-            std::size_t arrays_clear_missing = 0;
+            std::size_t free_craft_fields_applied = 0;
+            std::size_t free_craft_fields_missing = 0;
             const auto curve_result = apply_growth_curves(config, phase, debug);
 
             for (RC::Unreal::UObject* table : data_tables) {
@@ -1324,11 +1324,13 @@ private:
                         auto& status = setting_statuses[setting_id("direct_settings", "free_craft")];
                         ++status.targets_matched;
                         const auto verify_failures_before = mutation_math_failures_;
-                        const auto inputs = clear_array_field(table, "Inputs");
-                        const auto query_inputs = clear_array_field(table, "QueryInputs");
-                        const auto resource_inputs = clear_array_field(table, "ResourceInputs");
+                        const auto inputs = set_array_numeric_field(table, "Inputs", "Count", 0.0);
+                        const auto query_inputs = set_array_numeric_field(table, "QueryInputs", "Count", 0.0);
+                        const auto resource_inputs = set_array_numeric_field(table, "ResourceInputs", "Count", 0.0);
                         const std::size_t cleared = inputs.first + query_inputs.first + resource_inputs.first;
                         const std::size_t missing = inputs.second + query_inputs.second + resource_inputs.second;
+                        free_craft_fields_applied += cleared;
+                        free_craft_fields_missing += missing;
                         array_fields_applied += cleared;
                         array_fields_missing += missing;
                         status.applied += cleared;
@@ -1359,8 +1361,8 @@ private:
                     + " BoolFieldsMissing=" + std::to_string(bool_fields_missing)
                     + " DirectRewardFieldsApplied=" + std::to_string(direct_reward_fields_applied)
                     + " DirectRewardFieldsMissing=" + std::to_string(direct_reward_fields_missing)
-                    + " ArraysCleared=" + std::to_string(arrays_cleared)
-                    + " ArraysClearMissing=" + std::to_string(arrays_clear_missing)
+                    + " FreeCraftFieldsApplied=" + std::to_string(free_craft_fields_applied)
+                    + " FreeCraftFieldsMissing=" + std::to_string(free_craft_fields_missing)
                     + " CurveMutationStatus=" + curve_result.status
                     + " CurveObjectsSeen=" + std::to_string(curve_result.objects_seen)
                     + " CurveObjectsMatched=" + std::to_string(curve_result.objects_matched)
@@ -1377,7 +1379,7 @@ private:
                 || stat_fields_applied > 0
                 || bool_fields_applied > 0
                 || direct_reward_fields_applied > 0
-                || arrays_cleared > 0
+                || free_craft_fields_applied > 0
                 || curve_result.keys_applied > 0;
         } catch (const std::exception& error) {
             append_log(root_, std::string("ERROR: apply_table_settings exception: ") + error.what());
@@ -2780,8 +2782,13 @@ private:
         return {applied, missing};
     }
 
-    std::pair<std::size_t, std::size_t> clear_array_field(RC::Unreal::UObject* table, const char* array_field) {
-        const auto rows = get_table_rows(table, "clear_array_field");
+    std::pair<std::size_t, std::size_t> set_array_numeric_field(
+        RC::Unreal::UObject* table,
+        const char* array_field,
+        const char* numeric_field,
+        double expected
+    ) {
+        const auto rows = get_table_rows(table, "set_array_numeric_field");
         if (!rows) {
             return {0, 1};
         }
@@ -2789,13 +2796,26 @@ private:
         auto* row_struct = rows->row_struct;
         auto* array_property_base = find_struct_property_by_name(row_struct, array_field);
         auto* array_property = array_property_base ? RC::Unreal::CastField<RC::Unreal::FArrayProperty>(array_property_base) : nullptr;
-        if (!array_property) {
+        auto* inner_struct_property = array_property ? RC::Unreal::CastField<RC::Unreal::FStructProperty>(array_property->GetInner()) : nullptr;
+        RC::Unreal::UScriptStruct* inner_struct = inner_struct_property ? inner_struct_property->GetStruct() : nullptr;
+        auto* numeric_property_base = inner_struct ? find_struct_property_by_name(inner_struct, numeric_field) : nullptr;
+        auto* numeric_property = as_numeric_property(numeric_property_base);
+        if (!array_property || !inner_struct || !numeric_property) {
+            append_log(
+                root_,
+                "FIELD_MISS Table=" + narrow_unreal(table->GetFullName())
+                    + " ArrayField=" + array_field
+                    + " Field=" + numeric_field
+                    + " PropertyClass=" + property_class_name(numeric_property_base)
+                    + " Reason=array_numeric_field_not_found"
+            );
             return {0, 1};
         }
 
-        std::size_t cleared = 0;
+        std::size_t applied = 0;
         std::size_t missing = 0;
         for (auto it = row_map->CreateIterator(); it; ++it) {
+            const auto row_name = narrow_unreal(it.Key().ToString());
             unsigned char* row = it.Value();
             void* array_ptr = row ? array_property->ContainerPtrToValuePtr<void>(static_cast<void*>(row)) : nullptr;
             if (!array_ptr) {
@@ -2803,26 +2823,32 @@ private:
                 continue;
             }
             auto* array = static_cast<RC::Unreal::FScriptArray*>(array_ptr);
-            if (array && array->Num() > 0) {
-                const auto* inner = array_property->GetInner();
-                array->Empty(0, inner->GetElementSize(), inner->GetMinAlignment());
-                ++mutation_math_checks_;
-                if (array->Num() != 0) {
-                    ++mutation_math_failures_;
-                    if (mutation_math_logs_ < 80) {
-                        ++mutation_math_logs_;
-                        append_log(
-                            root_,
-                            "MATH_CHECK_FAIL Context=clear_array;table=" + narrow_unreal(table->GetFullName())
-                                + ";field=" + array_field
-                                + " Expected=0 Actual=" + std::to_string(array->Num())
-                        );
-                    }
+            if (!array || array->Num() <= 0) {
+                continue;
+            }
+
+            const int32_t element_size = array_property->GetInner()->GetElementSize();
+            const int32_t count = array->Num();
+            for (int32_t index = 0; index < count; ++index) {
+                auto* element = static_cast<unsigned char*>(array->GetData()) + (index * element_size);
+                void* value_ptr = element ? numeric_property->ContainerPtrToValuePtr<void>(static_cast<void*>(element)) : nullptr;
+                if (!value_ptr) {
+                    ++missing;
+                    continue;
                 }
-                ++cleared;
+                write_numeric_checked(
+                    numeric_property,
+                    value_ptr,
+                    expected,
+                    "table=" + narrow_unreal(table->GetFullName())
+                        + ";row=" + row_name
+                        + ";free_craft_array=" + array_field
+                        + ";index=" + std::to_string(index)
+                );
+                ++applied;
             }
         }
-        return {cleared, missing};
+        return {applied, applied > 0 ? 0 : missing};
     }
 
     std::pair<std::size_t, std::size_t> apply_range_group(

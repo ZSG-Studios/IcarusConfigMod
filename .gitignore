@@ -10,6 +10,7 @@ builds/
 dist/
 runtime_mods/
 backups/
+save_backups/
 recovery/
 
 # Local UE4SS/download/build artifacts
